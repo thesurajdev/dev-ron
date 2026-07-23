@@ -13,10 +13,10 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'full-app', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/mcp/manifest', (_req: Request, res: Response) => {
+app.get(['/api/mcp/manifest', '/manifest'], (_req: Request, res: Response) => {
   try {
     const manifest = getMcpManifest();
     res.json(manifest);
@@ -25,7 +25,7 @@ app.get('/api/mcp/manifest', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/mcp', async (req: Request, res: Response) => {
+app.post(['/api/mcp', '/mcp'], async (req: Request, res: Response) => {
   try {
     const response = await handleMCPRequest(req.body);
     res.json(response);
