@@ -356,6 +356,9 @@ export async function getEntity(userId: string, entityId: string) {
     .eq('user_id', userId)
     .single();
 
+  if (error?.code === 'PGRST116') {
+    throw new Error('Entity not found in user scope');
+  }
   if (error) throw error;
   return data;
 }
