@@ -160,6 +160,7 @@ Set environment variables in `.env`:
 - SUPABASE_URL
 - SUPABASE_ANON_KEY
 - DEFAULT_MCP_USER_ID (optional for local non-OAuth testing only)
+- MCP_OAUTH_SECRET (recommended; required in production for stable OAuth token/code signatures)
 
 ### Run
 
@@ -183,6 +184,7 @@ npm run dev:server
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY` (recommended for backend)
   - `PUBLIC_BASE_URL` (example: `https://your-domain.com`)
+  - `MCP_OAUTH_SECRET` (long random string used to sign OAuth tokens and auth codes)
 6. Redeploy.
 7. Verify:
   - `GET https://your-domain.com/health`

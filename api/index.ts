@@ -1,10 +1,18 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
-// CJS entry point for Vercel serverless
+// ESM entry point for Vercel serverless
 // Note: src/ files are ESM (root package.json "type":"module"), must use dynamic import()
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const crypto = require('crypto');
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import crypto from 'node:crypto';
+
+const OAUTH_SECRET =
+  process.env.MCP_OAUTH_SECRET ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  'dev-ron-insecure-oauth-secret';
+const ACCESS_TOKEN_TTL_SECONDS = Number(process.env.MCP_ACCESS_TOKEN_TTL_SECONDS || 86400);
+const REFRESH_TOKEN_TTL_SECONDS = Number(process.env.MCP_REFRESH_TOKEN_TTL_SECONDS || 2592000);
+const AUTH_CODE_TTL_SECONDS = Number(process.env.MCP_AUTH_CODE_TTL_SECONDS || 600);
 
 const app = express();
 app.use(cors());
@@ -44,6 +52,81 @@ const registeredClients: Record<string, any> = {};
 const validTokens: Map<string, { client_id: string; scope: string; expires_at: number }> = new Map();
 const authorizationCodes: Record<string, any> = {}; // Track auth codes with expiration
 
+function base64urlEncode(value: string | Buffer) {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function base64urlDecode(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function signPayload(payload: Record<string, any>) {
+  const payloadJson = JSON.stringify(payload);
+  const encodedPayload = base64urlEncode(payloadJson);
+  const sig = crypto.createHmac('sha256', OAUTH_SECRET).update(encodedPayload).digest('base64url');
+  return `${encodedPayload}.${sig}`;
+}
+
+function verifySignedPayload(token: string) {
+  try {
+    const [encodedPayload, providedSig] = token.split('.');
+    if (!encodedPayload || !providedSig) return null;
+
+    const expectedSig = crypto
+      .createHmac('sha256', OAUTH_SECRET)
+      .update(encodedPayload)
+      .digest('base64url');
+
+    if (providedSig !== expectedSig) return null;
+
+    const payload = JSON.parse(base64urlDecode(encodedPayload));
+    if (!payload || typeof payload !== 'object') return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function nowSeconds() {
+  return Math.floor(Date.now() / 1000);
+}
+
+function createAccessToken(clientId: string, scope: string) {
+  const exp = nowSeconds() + ACCESS_TOKEN_TTL_SECONDS;
+  const token = signPayload({
+    typ: 'access',
+    client_id: clientId,
+    scope,
+    exp,
+  });
+
+  // Keep legacy in-memory tracking for debugging and backward compatibility.
+  validTokens.set(token, {
+    client_id: clientId,
+    scope,
+    expires_at: exp * 1000,
+  });
+
+  return { token, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
+}
+
+function createRefreshToken(clientId: string, scope: string) {
+  const exp = nowSeconds() + REFRESH_TOKEN_TTL_SECONDS;
+  const token = signPayload({
+    typ: 'refresh',
+    client_id: clientId,
+    scope,
+    exp,
+  });
+  return { token, expiresIn: REFRESH_TOKEN_TTL_SECONDS };
+}
+
 // Generate a simple client ID and secret
 function generateClientCredentials() {
   return {
@@ -66,6 +149,37 @@ function generateAuthCode(clientId: string, redirectUri: string, scope: string) 
   return code;
 }
 
+function generateSignedAuthCode(clientId: string, redirectUri: string, scope: string) {
+  const exp = nowSeconds() + AUTH_CODE_TTL_SECONDS;
+  return signPayload({
+    typ: 'auth_code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope,
+    exp,
+    nonce: crypto.randomBytes(8).toString('hex'),
+  });
+}
+
+function validateAccessToken(token: string) {
+  const payload = verifySignedPayload(token);
+  if (payload?.typ === 'access' && payload.client_id && payload.scope && payload.exp > nowSeconds()) {
+    return {
+      client_id: payload.client_id,
+      scope: payload.scope,
+      expires_at: payload.exp * 1000,
+    };
+  }
+
+  // Legacy fallback for already-issued in-memory tokens.
+  const tokenInfo = validTokens.get(token);
+  if (tokenInfo && tokenInfo.expires_at > Date.now()) {
+    return tokenInfo;
+  }
+
+  return null;
+}
+
 // Middleware to validate Bearer token for MCP endpoints
 function validateMCPToken(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
@@ -82,8 +196,8 @@ function validateMCPToken(req: any, res: any, next: any) {
   }
 
   const token = parts[1];
-  const tokenInfo = validTokens.get(token);
-  const isValid = Boolean(tokenInfo && tokenInfo.expires_at > Date.now());
+  const tokenInfo = validateAccessToken(token);
+  const isValid = Boolean(tokenInfo);
   
   console.log('[Auth] Bearer token', isValid ? 'VALID' : 'INVALID/UNKNOWN');
 
@@ -211,7 +325,7 @@ app.get('/.well-known/oauth-authorization-server', (_req: any, res: any) => {
     token_endpoint: `${baseUrl}/oauth/token`,
     registration_endpoint: `${baseUrl}/oauth/register`,
     response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code', 'client_credentials'],
+    grant_types_supported: ['authorization_code', 'client_credentials', 'refresh_token'],
     client_types_supported: ['public', 'confidential'],
     code_challenge_methods_supported: ['S256', 'plain'],
     scopes_supported: ['mcp:read', 'mcp:write'],
@@ -271,30 +385,56 @@ app.post('/oauth/register', (req: any, res: any) => {
 // OAuth token endpoint - validates authorization code
 app.post('/oauth/token', (req: any, res: any) => {
   try {
-    const { grant_type, code, client_id, client_secret, redirect_uri } = req.body;
+    const { grant_type, code, client_id, client_secret, redirect_uri, refresh_token, scope } = req.body;
 
     if (grant_type === 'authorization_code') {
-      // Validate authorization code
-      const authCode = authorizationCodes[code];
-      
-      if (!authCode) {
-        return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code not found' });
-      }
-      
-      if (authCode.used) {
-        return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code already used' });
-      }
-      
-      if (Date.now() > authCode.expires_at) {
-        return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code expired' });
-      }
-      
-      if (authCode.client_id !== client_id) {
-        return res.status(400).json({ error: 'invalid_grant', error_description: 'Client ID mismatch' });
-      }
-      
-      if (redirect_uri && authCode.redirect_uri !== redirect_uri) {
-        return res.status(400).json({ error: 'invalid_grant', error_description: 'Redirect URI mismatch' });
+      // Preferred path: validate stateless signed auth code.
+      const signedCode = verifySignedPayload(String(code || ''));
+      let resolvedClientId = client_id;
+      let resolvedScope = 'mcp:read mcp:write';
+
+      if (signedCode?.typ === 'auth_code') {
+        if (signedCode.exp <= nowSeconds()) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code expired' });
+        }
+
+        if (client_id && signedCode.client_id !== client_id) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Client ID mismatch' });
+        }
+
+        if (redirect_uri && signedCode.redirect_uri !== redirect_uri) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Redirect URI mismatch' });
+        }
+
+        resolvedClientId = signedCode.client_id;
+        resolvedScope = signedCode.scope || resolvedScope;
+      } else {
+        // Legacy path for in-memory auth codes.
+        const authCode = authorizationCodes[code];
+
+        if (!authCode) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code not found' });
+        }
+
+        if (authCode.used) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code already used' });
+        }
+
+        if (Date.now() > authCode.expires_at) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code expired' });
+        }
+
+        if (authCode.client_id !== client_id) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Client ID mismatch' });
+        }
+
+        if (redirect_uri && authCode.redirect_uri !== redirect_uri) {
+          return res.status(400).json({ error: 'invalid_grant', error_description: 'Redirect URI mismatch' });
+        }
+
+        authCode.used = true;
+        resolvedClientId = authCode.client_id;
+        resolvedScope = authCode.scope || resolvedScope;
       }
 
       // Verify client credentials if provided
@@ -305,22 +445,19 @@ app.post('/oauth/token', (req: any, res: any) => {
         }
       }
 
-      // Mark code as used
-      authCode.used = true;
+      if (!resolvedClientId) {
+        return res.status(400).json({ error: 'invalid_request', error_description: 'client_id required' });
+      }
 
-      // Generate and track token
-      const accessToken = 'mcp-token-' + crypto.randomBytes(16).toString('hex');
-      validTokens.set(accessToken, {
-        client_id,
-        scope: authCode.scope,
-        expires_at: Date.now() + 86400 * 1000,
-      });
+      const access = createAccessToken(resolvedClientId, resolvedScope);
+      const refresh = createRefreshToken(resolvedClientId, resolvedScope);
 
       res.json({
-        access_token: accessToken,
+        access_token: access.token,
         token_type: 'Bearer',
-        expires_in: 86400,
-        scope: authCode.scope,
+        expires_in: access.expiresIn,
+        refresh_token: refresh.token,
+        scope: resolvedScope,
       });
     } else if (grant_type === 'client_credentials') {
       // Client credentials flow (for testing)
@@ -333,18 +470,35 @@ app.post('/oauth/token', (req: any, res: any) => {
         return res.status(401).json({ error: 'invalid_client' });
       }
 
-      const accessToken = 'mcp-token-' + crypto.randomBytes(16).toString('hex');
-      validTokens.set(accessToken, {
-        client_id,
-        scope: 'mcp:read mcp:write',
-        expires_at: Date.now() + 86400 * 1000,
-      });
+      const resolvedScope = typeof scope === 'string' && scope.trim() ? scope.trim() : 'mcp:read mcp:write';
+      const access = createAccessToken(client_id, resolvedScope);
+      const refresh = createRefreshToken(client_id, resolvedScope);
 
       res.json({
-        access_token: accessToken,
+        access_token: access.token,
         token_type: 'Bearer',
-        expires_in: 86400,
-        scope: 'mcp:read mcp:write',
+        expires_in: access.expiresIn,
+        refresh_token: refresh.token,
+        scope: resolvedScope,
+      });
+    } else if (grant_type === 'refresh_token') {
+      const payload = verifySignedPayload(String(refresh_token || ''));
+      if (!payload || payload.typ !== 'refresh') {
+        return res.status(400).json({ error: 'invalid_grant', error_description: 'Invalid refresh token' });
+      }
+
+      if (payload.exp <= nowSeconds()) {
+        return res.status(400).json({ error: 'invalid_grant', error_description: 'Refresh token expired' });
+      }
+
+      const refreshedScope = typeof scope === 'string' && scope.trim() ? scope.trim() : payload.scope;
+      const access = createAccessToken(payload.client_id, refreshedScope);
+
+      res.json({
+        access_token: access.token,
+        token_type: 'Bearer',
+        expires_in: access.expiresIn,
+        scope: refreshedScope,
       });
     } else {
       res.status(400).json({ error: 'unsupported_grant_type' });
@@ -359,19 +513,18 @@ app.get('/oauth/authorize', (req: any, res: any) => {
   try {
     const { client_id, redirect_uri, state, scope = 'mcp:read mcp:write' } = req.query;
 
-    // Verify client exists
-    const client = registeredClients[client_id];
-    if (!client) {
-      return res.status(400).json({ error: 'unauthorized_client' });
+    if (!client_id || !redirect_uri) {
+      return res.status(400).json({ error: 'invalid_request', error_description: 'client_id and redirect_uri required' });
     }
 
-    // Verify redirect URI matches registered URI
-    if (!client.redirect_uris.includes(redirect_uri)) {
+    // Verify redirect URI when client metadata is available.
+    const client = registeredClients[client_id];
+    if (client && !client.redirect_uris.includes(redirect_uri)) {
       return res.status(400).json({ error: 'invalid_request', error_description: 'Redirect URI not registered' });
     }
 
-    // Generate and store authorization code
-    const code = generateAuthCode(client_id, redirect_uri, scope);
+    // Issue a stateless authorization code so flow survives cold starts.
+    const code = generateSignedAuthCode(client_id, redirect_uri, scope);
     
     // Redirect with code and state
     const redirectUrl = new URL(redirect_uri);
@@ -387,22 +540,24 @@ app.get('/oauth/authorize', (req: any, res: any) => {
 // OAuth direct code endpoint - for clients that can't follow redirects
 app.post('/oauth/authorize', (req: any, res: any) => {
   try {
-    const { client_id, scope = 'mcp:read mcp:write' } = req.body;
+    const { client_id, scope = 'mcp:read mcp:write', redirect_uri } = req.body;
 
-    // Verify client exists
-    const client = registeredClients[client_id];
-    if (!client) {
-      return res.status(400).json({ error: 'unauthorized_client' });
+    if (!client_id) {
+      return res.status(400).json({ error: 'invalid_request', error_description: 'client_id required' });
     }
 
-    // Generate and return authorization code directly (no redirect)
-    const redirect_uri = client.redirect_uris[0]; // Use first registered URI
-    const code = generateAuthCode(client_id, redirect_uri, scope);
+    const client = registeredClients[client_id];
+    const resolvedRedirectUri =
+      redirect_uri ||
+      client?.redirect_uris?.[0] ||
+      'https://claude.ai/callback';
+
+    const code = generateSignedAuthCode(client_id, resolvedRedirectUri, scope);
     
     res.json({
       code,
       scope,
-      expires_in: 600, // 10 minutes
+      expires_in: AUTH_CODE_TTL_SECONDS,
     });
   } catch (err: any) {
     res.status(400).json({ error: 'server_error', error_description: err.message });
@@ -436,5 +591,5 @@ app.use((_req: any, res: any) => {
   res.status(404).json({ error: 'not_found', path: _req.path, method: _req.method });
 });
 
-module.exports = app;
+export default app;
 

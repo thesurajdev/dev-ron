@@ -18,6 +18,7 @@ Set in `.env`:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `PUBLIC_BASE_URL` (example: `https://your-domain.com`)
+- `MCP_OAUTH_SECRET` (long random string for OAuth token/code signing; required in production)
 
 ## 3. Create database schema
 
