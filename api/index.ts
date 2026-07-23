@@ -13,6 +13,7 @@ app.use(express.json());
 // In-memory OAuth client store (in production use database)
 const registeredClients: Record<string, any> = {};
 const validTokens: Set<string> = new Set();
+const authorizationCodes: Record<string, any> = {}; // Track auth codes with expiration
 
 // Generate a simple client ID and secret
 function generateClientCredentials() {
@@ -20,6 +21,20 @@ function generateClientCredentials() {
     id: crypto.randomBytes(16).toString('hex'),
     secret: crypto.randomBytes(32).toString('hex'),
   };
+}
+
+// Generate and store authorization code (expires in 10 minutes)
+function generateAuthCode(clientId: string, redirectUri: string, scope: string) {
+  const code = 'code-' + crypto.randomBytes(16).toString('hex');
+  authorizationCodes[code] = {
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope,
+    created_at: Date.now(),
+    expires_at: Date.now() + 10 * 60 * 1000, // 10 minute expiration
+    used: false,
+  };
+  return code;
 }
 
 // Middleware to validate Bearer token for MCP endpoints
@@ -136,13 +151,36 @@ app.post('/oauth/register', (req: any, res: any) => {
   }
 });
 
-// OAuth token endpoint
+// OAuth token endpoint - validates authorization code
 app.post('/oauth/token', (req: any, res: any) => {
   try {
-    const { grant_type, code, client_id, client_secret } = req.body;
+    const { grant_type, code, client_id, client_secret, redirect_uri } = req.body;
 
-    if (grant_type === 'authorization_code' || grant_type === 'client_credentials') {
-      // Verify client if secret provided
+    if (grant_type === 'authorization_code') {
+      // Validate authorization code
+      const authCode = authorizationCodes[code];
+      
+      if (!authCode) {
+        return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code not found' });
+      }
+      
+      if (authCode.used) {
+        return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code already used' });
+      }
+      
+      if (Date.now() > authCode.expires_at) {
+        return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code expired' });
+      }
+      
+      if (authCode.client_id !== client_id) {
+        return res.status(400).json({ error: 'invalid_grant', error_description: 'Client ID mismatch' });
+      }
+      
+      if (redirect_uri && authCode.redirect_uri !== redirect_uri) {
+        return res.status(400).json({ error: 'invalid_grant', error_description: 'Redirect URI mismatch' });
+      }
+
+      // Verify client credentials if provided
       if (client_secret) {
         const client = registeredClients[client_id];
         if (!client || client.client_secret !== client_secret) {
@@ -150,8 +188,32 @@ app.post('/oauth/token', (req: any, res: any) => {
         }
       }
 
+      // Mark code as used
+      authCode.used = true;
+
+      // Generate and track token
       const accessToken = 'mcp-token-' + crypto.randomBytes(16).toString('hex');
-      validTokens.add(accessToken); // Track this token
+      validTokens.add(accessToken);
+
+      res.json({
+        access_token: accessToken,
+        token_type: 'Bearer',
+        expires_in: 86400,
+        scope: authCode.scope,
+      });
+    } else if (grant_type === 'client_credentials') {
+      // Client credentials flow (for testing)
+      if (!client_secret) {
+        return res.status(400).json({ error: 'invalid_request', error_description: 'client_secret required for client_credentials' });
+      }
+      
+      const client = registeredClients[client_id];
+      if (!client || client.client_secret !== client_secret) {
+        return res.status(401).json({ error: 'invalid_client' });
+      }
+
+      const accessToken = 'mcp-token-' + crypto.randomBytes(16).toString('hex');
+      validTokens.add(accessToken);
 
       res.json({
         access_token: accessToken,
@@ -167,14 +229,34 @@ app.post('/oauth/token', (req: any, res: any) => {
   }
 });
 
-// OAuth authorization endpoint
+// OAuth authorization endpoint - issues authorization code
 app.get('/oauth/authorize', (req: any, res: any) => {
-  const { redirect_uri, state } = req.query;
-  const code = 'code-' + crypto.randomBytes(16).toString('hex');
-  const redirectUrl = new URL(redirect_uri);
-  redirectUrl.searchParams.set('code', code);
-  redirectUrl.searchParams.set('state', state);
-  res.redirect(redirectUrl.toString());
+  try {
+    const { client_id, redirect_uri, state, scope = 'mcp:read mcp:write' } = req.query;
+
+    // Verify client exists
+    const client = registeredClients[client_id];
+    if (!client) {
+      return res.status(400).json({ error: 'unauthorized_client' });
+    }
+
+    // Verify redirect URI matches registered URI
+    if (!client.redirect_uris.includes(redirect_uri)) {
+      return res.status(400).json({ error: 'invalid_request', error_description: 'Redirect URI not registered' });
+    }
+
+    // Generate and store authorization code
+    const code = generateAuthCode(client_id, redirect_uri, scope);
+    
+    // Redirect with code and state
+    const redirectUrl = new URL(redirect_uri);
+    redirectUrl.searchParams.set('code', code);
+    if (state) redirectUrl.searchParams.set('state', state);
+    
+    res.redirect(redirectUrl.toString());
+  } catch (err: any) {
+    res.status(400).json({ error: 'server_error', error_description: err.message });
+  }
 });
 
 // SSE endpoint for Claude.ai Remote MCP connection
