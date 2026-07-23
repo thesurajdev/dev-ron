@@ -94,6 +94,15 @@ function tokenizeQuery(query: string): string[] {
     .filter((t) => !stopwords.has(t));
 }
 
+function isRelationshipToken(token: string): boolean {
+  return ['husband', 'wife', 'spouse', 'partner'].includes(token);
+}
+
+function normalizeRelationshipToken(token: string): string {
+  if (token === 'husband' || token === 'wife') return 'spouse';
+  return token;
+}
+
 /**
  * MCP Handlers - Smart entity management
  */
@@ -212,13 +221,15 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       const normalized = withUserId(input);
       const { user_id, entity_id, relationship_type } = normalized;
 
+      const mainEntity = await getEntity(entity_id);
       const related = await getRelatedEntities(user_id, entity_id);
+      const relationByEntityId = new Map<string, string>(
+        (mainEntity?.related_to || []).map((r: any) => [r.entity_id, r.relationship_type])
+      );
 
       let filtered = related;
       if (relationship_type) {
-        // Get main entity to filter relationships
-        const entity = await getEntity(entity_id);
-        const relatedIds = entity.related_to
+        const relatedIds = (mainEntity?.related_to || [])
           .filter((r: any) => r.relationship_type === relationship_type)
           .map((r: any) => r.entity_id);
         filtered = related.filter((r: any) => relatedIds.includes(r.id));
@@ -229,6 +240,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
         related_entities: filtered.map((e) => ({
           id: e.id,
           type: e.entity_type,
+          relationship_type: relationByEntityId.get(e.id) || 'related_to',
           data: e.data,
           tags: e.tags,
         })),
@@ -342,6 +354,10 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       const { user_id, query, entity_type, limit = 50 } = normalized;
 
       const tokens = tokenizeQuery(query);
+      const relationshipToken = tokens.find((t) => isRelationshipToken(t));
+      const relationshipIntent = relationshipToken
+        ? normalizeRelationshipToken(relationshipToken)
+        : undefined;
 
       // First pass: indexed field search (fast)
       const indexedResults = await searchEntities(user_id, query, entity_type);
@@ -385,6 +401,54 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       });
       const mergedResults = Array.from(byId.values());
 
+      let relationshipSummary: Record<string, any> | undefined;
+      if (relationshipIntent) {
+        const subjectTokens = tokens.filter((t) => !isRelationshipToken(t));
+        if (subjectTokens.length > 0) {
+          const subjectQuery = subjectTokens.join(' ');
+          let subjectCandidates = await searchEntities(user_id, subjectQuery, 'person');
+          if (!explicitUserScope && subjectCandidates.length === 0) {
+            subjectCandidates = await searchEntitiesAnyUser(subjectQuery, 'person');
+          }
+
+          if (subjectCandidates.length > 0) {
+            const subject = subjectCandidates[0];
+            const subjectEntity = await getEntity(subject.id);
+            const relationByEntityId = new Map<string, string>(
+              (subjectEntity?.related_to || []).map((r: any) => [r.entity_id, r.relationship_type])
+            );
+            const related = await getRelatedEntities(user_id, subject.id);
+
+            const matches = related
+              .filter((r: any) => {
+                const rel = normalizeText(relationByEntityId.get(r.id) || '');
+                if (relationshipIntent === 'spouse') {
+                  return rel.includes('spouse') || rel.includes('husband') || rel.includes('wife') || rel.includes('partner');
+                }
+                return rel.includes(relationshipIntent);
+              })
+              .map((r: any) => ({
+                id: r.id,
+                relationship_type: relationByEntityId.get(r.id) || 'related_to',
+                name: r?.data?.name || null,
+                type: r.entity_type,
+                data: r.data,
+              }));
+
+            relationshipSummary = {
+              query_type: 'relationship_lookup',
+              relationship: relationshipIntent,
+              subject: {
+                id: subject.id,
+                name: subject?.data?.name || null,
+              },
+              count: matches.length,
+              matches,
+            };
+          }
+        }
+      }
+
       // Booking intent summary (e.g., "pending caricature booking")
       const bookingIntent = tokens.some((t) => t.includes('booking')) || tokens.some((t) => t.includes('order'));
       const pendingIntent = tokens.includes('pending');
@@ -425,11 +489,13 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
           mergedResults.length === 0
             ? 'No matching business object found in current memory scope for this query.'
             : undefined,
+        relationship_summary: relationshipSummary,
         summary: intentSummary,
         results: mergedResults.slice(0, limit).map((r) => ({
           id: r.id,
           type: r.entity_type,
           data: r.data,
+          related_to: r.related_to || [],
           tags: r.tags,
           last_updated: r.updated_at,
         })),
