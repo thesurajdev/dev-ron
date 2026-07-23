@@ -4,6 +4,8 @@
  * Uses flexible entity model (server-v2)
  */
 
+import { MCP_HANDLERS, getMcpManifest } from './server-v2.js';
+
 export interface MCPRequest {
   jsonrpc?: string;
   id?: string | number;
@@ -27,9 +29,6 @@ export interface MCPResponse {
  */
 export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
   try {
-    // @ts-ignore - Dynamic import
-    const { MCP_HANDLERS, getMcpManifest } = await import('./server-v2.js');
-
     // Handle JSON-RPC 2.0 format
     if (req.jsonrpc === '2.0') {
       if (req.method === 'tools/list') {
@@ -113,7 +112,5 @@ export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
  * Get manifest
  */
 export async function getManifest() {
-  // @ts-ignore - Dynamic import
-  const { getMcpManifest } = await import('./server-v2.js');
   return getMcpManifest();
 }
