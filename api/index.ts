@@ -74,5 +74,26 @@ app.get('/oauth/authorize', (req: any, res: any) => {
   res.redirect(redirectUrl.toString());
 });
 
+// SSE endpoint for Claude.ai Remote MCP connection
+app.get('/sse', (req: any, res: any) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  // Send server info
+  res.write(`data: ${JSON.stringify({ 
+    type: 'message',
+    message: { type: 'serverInfo', info: { name: 'Dev-Ron MCP', version: '2.0.0' } }
+  })}\n\n`);
+
+  // Keep alive with heartbeats
+  const heartbeat = setInterval(() => {
+    res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`);
+  }, 30000);
+
+  req.on('close', () => clearInterval(heartbeat));
+});
+
 module.exports = app;
 
