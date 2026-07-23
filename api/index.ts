@@ -90,43 +90,15 @@ app.get(['/api/mcp/manifest', '/manifest'], async (_req: any, res: any) => {
   }
 });
 
-// MCP endpoint - GET returns manifest (for validation), POST handles requests
-app.get(['/api/mcp', '/mcp'], validateMCPToken, async (_req: any, res: any) => {
+// MCP endpoint - GET returns manifest (NO AUTH - must be accessible for Claude to validate)
+app.get(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
   try {
-    console.log('[MCP GET] Request received');
-    
-    // Import and get manifest
-    let manifest;
-    try {
-      const module = await import('../src/mcp/server-v2.js');
-      manifest = module.getMcpManifest();
-    } catch (importErr: any) {
-      console.error('[MCP GET] Import error:', importErr.message);
-      return res.status(500).json({ 
-        error: 'Failed to load MCP server', 
-        details: importErr.message 
-      });
-    }
-    
-    // Verify manifest has tools
-    if (!manifest || !manifest.tools) {
-      console.error('[MCP GET] Invalid manifest structure');
-      return res.status(500).json({ error: 'Invalid manifest structure' });
-    }
-    
-    console.log('[MCP GET] Success - returning', manifest.tools.length, 'tools');
-    
-    // Set proper headers
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'no-cache');
-    
+    const module = await import('../src/mcp/server-v2.js');
+    const manifest = module.getMcpManifest();
     res.json(manifest);
   } catch (err: any) {
-    console.error('[MCP GET] Unhandled error:', err);
-    res.status(500).json({ 
-      error: 'Internal Server Error',
-      message: err?.message || 'Unknown error'
-    });
+    console.error('[MCP GET] Error:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
 
