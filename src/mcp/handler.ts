@@ -30,6 +30,30 @@ export interface MCPResponse {
   data?: any;
 }
 
+type ManifestTool = {
+  name: string;
+  description?: string;
+  input_schema?: Record<string, any>;
+  inputSchema?: Record<string, any>;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  openWorldHint?: boolean;
+  annotations?: Record<string, any>;
+};
+
+function toMcpTool(tool: ManifestTool) {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema || tool.input_schema || { type: 'object', properties: {} },
+    annotations: tool.annotations || {
+      readOnlyHint: Boolean(tool.readOnlyHint),
+      openWorldHint: Boolean(tool.openWorldHint),
+      destructiveHint: Boolean(tool.destructiveHint),
+    },
+  };
+}
+
 /**
  * Handle MCP requests - supports both JSON-RPC 2.0 and legacy format
  */
@@ -76,11 +100,12 @@ export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
       }
 
       if (req.method === 'tools/list') {
+        const tools = (getMcpManifest().tools || []).map((tool: ManifestTool) => toMcpTool(tool));
         return {
           jsonrpc: '2.0',
           id: req.id,
           result: {
-            tools: getMcpManifest().tools,
+            tools,
           },
         };
       }
@@ -111,11 +136,18 @@ export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
         }
 
         try {
-          const result = await MCP_HANDLERS[toolName](args);
+          const toolResult = await MCP_HANDLERS[toolName](args);
           return {
             jsonrpc: '2.0',
             id: req.id,
-            result,
+            result: {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(toolResult),
+                },
+              ],
+            },
           };
         } catch (err: any) {
           return {
