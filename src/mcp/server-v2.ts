@@ -663,5 +663,6 @@ export function getMcpManifest() {
         },
       },
     ],
+    resources: [],
   };
 }
