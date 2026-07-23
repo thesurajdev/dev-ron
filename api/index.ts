@@ -26,7 +26,7 @@ app.use((req: any, res: any, next: any) => {
 
 // In-memory OAuth client store (in production use database)
 const registeredClients: Record<string, any> = {};
-const validTokens: Set<string> = new Set();
+const validTokens: Map<string, { client_id: string; scope: string; expires_at: number }> = new Map();
 const authorizationCodes: Record<string, any> = {}; // Track auth codes with expiration
 
 // Generate a simple client ID and secret
@@ -57,21 +57,28 @@ function validateMCPToken(req: any, res: any, next: any) {
   
   if (!authHeader) {
     console.log('[Auth] No authorization header');
-    return next();
+    return res.status(401).json({ error: 'unauthorized', error_description: 'Bearer token required' });
   }
 
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
     console.log('[Auth] Invalid bearer format');
-    return next();
+    return res.status(401).json({ error: 'invalid_token', error_description: 'Invalid bearer token format' });
   }
 
   const token = parts[1];
-  const isValid = validTokens.has(token);
+  const tokenInfo = validTokens.get(token);
+  const isValid = Boolean(tokenInfo && tokenInfo.expires_at > Date.now());
   
   console.log('[Auth] Bearer token', isValid ? 'VALID' : 'INVALID/UNKNOWN');
+
+  if (!isValid || !tokenInfo) {
+    return res.status(401).json({ error: 'invalid_token', error_description: 'Token is invalid or expired' });
+  }
+
+  // Bind request to tenant scope derived from OAuth client.
+  req.mcpUserId = `tenant:${tokenInfo.client_id}`;
   
-  // ALWAYS allow - check only for logging
   next();
 }
 
@@ -149,7 +156,7 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
     
     // Call handler
     console.log('[MCP POST] Calling handler...');
-    const response = await handler(req.body);
+    const response = await handler(req.body, { userId: req.mcpUserId });
     
     const duration = Date.now() - startTime;
     console.log(`[MCP POST] Success in ${duration}ms`);
@@ -286,7 +293,11 @@ app.post('/oauth/token', (req: any, res: any) => {
 
       // Generate and track token
       const accessToken = 'mcp-token-' + crypto.randomBytes(16).toString('hex');
-      validTokens.add(accessToken);
+      validTokens.set(accessToken, {
+        client_id,
+        scope: authCode.scope,
+        expires_at: Date.now() + 86400 * 1000,
+      });
 
       res.json({
         access_token: accessToken,
@@ -306,7 +317,11 @@ app.post('/oauth/token', (req: any, res: any) => {
       }
 
       const accessToken = 'mcp-token-' + crypto.randomBytes(16).toString('hex');
-      validTokens.add(accessToken);
+      validTokens.set(accessToken, {
+        client_id,
+        scope: 'mcp:read mcp:write',
+        expires_at: Date.now() + 86400 * 1000,
+      });
 
       res.json({
         access_token: accessToken,

@@ -30,6 +30,10 @@ export interface MCPResponse {
   data?: any;
 }
 
+export interface MCPRuntimeContext {
+  userId?: string;
+}
+
 type ManifestTool = {
   name: string;
   description?: string;
@@ -54,10 +58,19 @@ function toMcpTool(tool: ManifestTool) {
   };
 }
 
+function withRuntimeUserScope(args: Record<string, any>, context?: MCPRuntimeContext) {
+  if (args?.user_id) return args;
+  if (!context?.userId) return args;
+  return { ...args, user_id: context.userId };
+}
+
 /**
  * Handle MCP requests - supports both JSON-RPC 2.0 and legacy format
  */
-export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
+export async function handleMCPRequest(
+  req: MCPRequest,
+  context?: MCPRuntimeContext
+): Promise<MCPResponse> {
   try {
     // Handle JSON-RPC 2.0 format
     if (req.jsonrpc === '2.0') {
@@ -122,7 +135,7 @@ export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
 
       if (req.method === 'tools/call') {
         const toolName = req.params?.name;
-        const args = req.params?.arguments || {};
+        const args = withRuntimeUserScope(req.params?.arguments || {}, context);
 
         if (!toolName || !MCP_HANDLERS[toolName]) {
           return {
@@ -174,7 +187,7 @@ export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
     // Handle legacy format: { tool, input }
     if (req.tool) {
       const toolName = req.tool;
-      const args = req.input || {};
+      const args = withRuntimeUserScope(req.input || {}, context);
 
       if (!MCP_HANDLERS[toolName]) {
         return { success: false, error: `Tool '${toolName}' not found` } as any;
