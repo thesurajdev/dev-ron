@@ -55,24 +55,23 @@ function generateAuthCode(clientId: string, redirectUri: string, scope: string) 
 function validateMCPToken(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
   
-  // Allow both with and without token for backward compatibility
   if (!authHeader) {
-    return next(); // Allow access without token for now
+    console.log('[Auth] No authorization header');
+    return next();
   }
 
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    return next(); // Not a bearer token, continue anyway
+    console.log('[Auth] Invalid bearer format');
+    return next();
   }
 
   const token = parts[1];
+  const isValid = validTokens.has(token);
   
-  // Check if token is valid (any token we issued)
-  if (!validTokens.has(token)) {
-    // Token doesn't match any we issued, but still allow for now
-    // In production, reject here
-  }
+  console.log('[Auth] Bearer token', isValid ? 'VALID' : 'INVALID/UNKNOWN');
   
+  // ALWAYS allow - check only for logging
   next();
 }
 
@@ -94,20 +93,27 @@ app.get(['/api/mcp/manifest', '/manifest'], async (_req: any, res: any) => {
 // MCP endpoint - GET returns manifest (for validation), POST handles requests
 app.get(['/api/mcp', '/mcp'], validateMCPToken, async (_req: any, res: any) => {
   try {
+    console.log('[MCP GET] Returning manifest');
     const { getMcpManifest } = await import('../src/mcp/server-v2.js');
-    res.json(getMcpManifest());
+    const manifest = getMcpManifest();
+    console.log('[MCP GET] Success, tools:', manifest.tools?.length);
+    res.json(manifest);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[MCP GET] Error:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', message: err.message });
   }
 });
 
 app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
   try {
+    console.log('[MCP POST] Request method:', req.body.method || req.body.tool);
     const { handleMCPRequest } = await import('../src/mcp/handler.js');
     const response = await handleMCPRequest(req.body);
+    console.log('[MCP POST] Success');
     res.json(response);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[MCP POST] Error:', err.message, err.stack?.split('\n')[0]);
+    res.status(500).json({ error: 'Internal Server Error', message: err.message });
   }
 });
 
