@@ -434,7 +434,13 @@ export function getMcpManifest() {
         description:
           'Add or update data (smart consolidation). Auto-detects existing entities and merges without duplication.',
         readOnlyHint: false,
+        openWorldHint: false,
         destructiveHint: true,
+        annotations: {
+          readOnlyHint: false,
+          openWorldHint: false,
+          destructiveHint: true,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -454,6 +460,13 @@ export function getMcpManifest() {
         description:
           'Get complete entity profile with all consolidated data (no duplicates). Includes full history.',
         readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -470,6 +483,13 @@ export function getMcpManifest() {
         name: 'get_related',
         description: 'Get all entities related to this one, with relationship types',
         readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -484,6 +504,13 @@ export function getMcpManifest() {
         name: 'get_timeline',
         description: 'Get chronological timeline of all activities',
         readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -500,6 +527,13 @@ export function getMcpManifest() {
         description:
           'Get consolidated summary for period. Complete without duplicates or missing data.',
         readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -516,6 +550,13 @@ export function getMcpManifest() {
         name: 'search',
         description: 'Smart search across all data fields',
         readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -531,7 +572,13 @@ export function getMcpManifest() {
         name: 'link_entities',
         description: 'Create relationship between two entities',
         readOnlyHint: false,
+        openWorldHint: false,
         destructiveHint: true,
+        annotations: {
+          readOnlyHint: false,
+          openWorldHint: false,
+          destructiveHint: true,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -548,7 +595,13 @@ export function getMcpManifest() {
         name: 'merge_entities',
         description: 'Merge duplicate entities (detected by system)',
         readOnlyHint: false,
+        openWorldHint: false,
         destructiveHint: true,
+        annotations: {
+          readOnlyHint: false,
+          openWorldHint: false,
+          destructiveHint: true,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -563,7 +616,13 @@ export function getMcpManifest() {
         name: 'record_metric',
         description: 'Record a KPI or metric value',
         readOnlyHint: false,
+        openWorldHint: false,
         destructiveHint: true,
+        annotations: {
+          readOnlyHint: false,
+          openWorldHint: false,
+          destructiveHint: true,
+        },
         input_schema: {
           type: 'object',
           properties: {
@@ -581,6 +640,13 @@ export function getMcpManifest() {
         name: 'get_metrics',
         description: 'Get metrics for period',
         readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
         input_schema: {
           type: 'object',
           properties: {
