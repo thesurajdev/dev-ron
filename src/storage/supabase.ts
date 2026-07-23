@@ -10,6 +10,13 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');
 
+function sanitizeSearchQuery(query: string): string {
+  return String(query || '')
+    .replace(/[%(),?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function isPlainObject(value: any): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -357,6 +364,9 @@ export async function searchEntities(
   query: string,
   entityType?: string
 ) {
+  const safeQuery = sanitizeSearchQuery(query);
+  if (!safeQuery) return [];
+
   let q = supabase
     .from('entities')
     .select('*')
@@ -368,7 +378,7 @@ export async function searchEntities(
 
   // Search across data fields
   q = q.or(
-    `data->>name.ilike.%${query}%,data->>email.ilike.%${query}%,data->>phone.ilike.%${query}%,data->>company.ilike.%${query}%`
+    `data->>name.ilike.%${safeQuery}%,data->>email.ilike.%${safeQuery}%,data->>phone.ilike.%${safeQuery}%,data->>company.ilike.%${safeQuery}%`
   );
 
   const { data, error } = await q.limit(50);
@@ -386,6 +396,9 @@ export async function searchEntitiesAnyUser(
   entityType?: string,
   limit = 100
 ) {
+  const safeQuery = sanitizeSearchQuery(query);
+  if (!safeQuery) return [];
+
   let q = supabase.from('entities').select('*');
 
   if (entityType) {
@@ -393,7 +406,7 @@ export async function searchEntitiesAnyUser(
   }
 
   q = q.or(
-    `data->>name.ilike.%${query}%,data->>email.ilike.%${query}%,data->>phone.ilike.%${query}%,data->>company.ilike.%${query}%`
+    `data->>name.ilike.%${safeQuery}%,data->>email.ilike.%${safeQuery}%,data->>phone.ilike.%${safeQuery}%,data->>company.ilike.%${safeQuery}%`
   );
 
   const { data, error } = await q.limit(limit);
