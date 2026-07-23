@@ -11,50 +11,28 @@ Dev-Ron is a **Model Context Protocol (MCP) server** that provides intelligent d
 
 ## For Claude.ai Integration
 
-### Option 1: Using `npx` with stdio MCP (Recommended)
+### Quick Setup - Try This First
 
-If you have Node.js installed locally:
+In Claude.ai Settings → Connectors:
 
-```bash
-npx dev-ron@latest mcp
-```
+1. **Click "Add custom connector"** (or if RON exists, remove it first)
+2. Fill in:
+   - **Name:** Dev-Ron
+   - **Remote MCP server URL:** `https://ron.surajdev.com/api/mcp`
+3. Click "Add"
+4. When it asks to "Connect", click "Connect"
 
-Then in Claude.ai:
-1. Go to Settings → Connectors
-2. Click "Add custom connector"
-3. Choose **"Remote MCP server"**
-4. In "Remote MCP server URL", use: 
-   - **macOS/Linux:** `command://npx dev-ron@latest mcp`
-   - Or install globally: `npm install -g dev-ron` then use `command://dev-ron-mcp`
+The endpoint is ready. All 10 tools will be available immediately.
 
-### Option 2: Using Custom Domain Endpoint
+### If "Connection issue" error appears:
 
-Claude.ai also supports HTTP-based MCP servers.
+**Try Option A: Remove and Re-add**
+1. Remove the connector (3-dot menu → Remove)
+2. Add it again with exact URL: `https://ron.surajdev.com/api/mcp`
+3. Click "Connect" again
 
-**Use this URL:** 
-```
-https://ron.surajdev.com/api/mcp
-```
-
-In Claude.ai:
-1. Go to Settings → Connectors
-2. Click "Add custom connector"
-3. Name: `Dev-Ron Data Logger`
-4. Remote MCP server URL: `https://ron.surajdev.com/api/mcp`
-5. Leave OAuth fields empty (not required)
-6. Click "Add"
-
-### Option 3: Local Development Server
-
-Run the MCP SSE server locally:
-
-```bash
-npm run mcp
-```
-
-Server runs on: `http://localhost:3001/mcp`
-
-Then configure Claude.ai with that local URL.
+**Try Option B: Use Alternative Endpoint**
+If the above doesn't work, Claude.ai might need a simpler endpoint format. Contact support with the error reference ID shown in Claude.ai.
 
 ## Available Tools (10 total)
 
