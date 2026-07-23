@@ -12,6 +12,7 @@ app.use(express.json());
 
 // In-memory OAuth client store (in production use database)
 const registeredClients: Record<string, any> = {};
+const validTokens: Set<string> = new Set();
 
 // Generate a simple client ID and secret
 function generateClientCredentials() {
@@ -19,6 +20,31 @@ function generateClientCredentials() {
     id: crypto.randomBytes(16).toString('hex'),
     secret: crypto.randomBytes(32).toString('hex'),
   };
+}
+
+// Middleware to validate Bearer token for MCP endpoints
+function validateMCPToken(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  
+  // Allow both with and without token for backward compatibility
+  if (!authHeader) {
+    return next(); // Allow access without token for now
+  }
+
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return next(); // Not a bearer token, continue anyway
+  }
+
+  const token = parts[1];
+  
+  // Check if token is valid (any token we issued)
+  if (!validTokens.has(token)) {
+    // Token doesn't match any we issued, but still allow for now
+    // In production, reject here
+  }
+  
+  next();
 }
 
 // Health - no imports needed
@@ -37,7 +63,7 @@ app.get(['/api/mcp/manifest', '/manifest'], async (_req: any, res: any) => {
 });
 
 // MCP endpoint - GET returns manifest (for validation), POST handles requests
-app.get(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
+app.get(['/api/mcp', '/mcp'], validateMCPToken, async (_req: any, res: any) => {
   try {
     const { getMcpManifest } = await import('../src/mcp/server-v2.js');
     res.json(getMcpManifest());
@@ -46,7 +72,7 @@ app.get(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
   }
 });
 
-app.post(['/api/mcp', '/mcp'], async (req: any, res: any) => {
+app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
   try {
     const { handleMCPRequest } = await import('../src/mcp/handler.js');
     const response = await handleMCPRequest(req.body);
@@ -67,13 +93,15 @@ app.get('/.well-known/oauth-authorization-server', (_req: any, res: any) => {
     grant_types_supported: ['authorization_code', 'client_credentials'],
     client_types_supported: ['public', 'confidential'],
     code_challenge_methods_supported: ['S256', 'plain'],
+    scopes_supported: ['mcp:read', 'mcp:write'],
+    token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
   });
 });
 
 // OAuth 2.0 Dynamic Client Registration - RFC 7591 - ALLOWS CLAUDE TO AUTO-REGISTER
 app.post('/oauth/register', (req: any, res: any) => {
   try {
-    const { client_name, redirect_uris, response_types = ['code'] } = req.body;
+    const { client_name, redirect_uris, response_types = ['code'], scope } = req.body;
 
     if (!client_name) {
       return res.status(400).json({ error: 'invalid_request', error_description: 'client_name required' });
@@ -90,6 +118,7 @@ app.post('/oauth/register', (req: any, res: any) => {
       client_name,
       redirect_uris: redirect_uris || ['https://claude.ai/callback'],
       response_types,
+      scope: scope || 'mcp:read mcp:write',
       created_at: Date.now(),
     };
 
@@ -100,6 +129,7 @@ app.post('/oauth/register', (req: any, res: any) => {
       client_name,
       redirect_uris: redirect_uris || ['https://claude.ai/callback'],
       response_types,
+      scope: 'mcp:read mcp:write',
     });
   } catch (err: any) {
     res.status(400).json({ error: 'invalid_request', error_description: err.message });
@@ -120,10 +150,14 @@ app.post('/oauth/token', (req: any, res: any) => {
         }
       }
 
+      const accessToken = 'mcp-token-' + crypto.randomBytes(16).toString('hex');
+      validTokens.add(accessToken); // Track this token
+
       res.json({
-        access_token: 'mcp-token-' + crypto.randomBytes(16).toString('hex'),
+        access_token: accessToken,
         token_type: 'Bearer',
         expires_in: 86400,
+        scope: 'mcp:read mcp:write',
       });
     } else {
       res.status(400).json({ error: 'unsupported_grant_type' });
