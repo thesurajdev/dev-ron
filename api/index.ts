@@ -321,7 +321,7 @@ app.post('/oauth/authorize', (req: any, res: any) => {
     const code = generateAuthCode(client_id, redirect_uri, scope);
     
     res.json({
-      authorization_code: code,
+      code,
       scope,
       expires_in: 600, // 10 minutes
     });
