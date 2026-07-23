@@ -10,6 +10,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Request logging middleware
+app.use((req: any, res: any, next: any) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.path}`);
+  if (req.method === 'POST' && req.body) {
+    console.log(`  Body keys: ${Object.keys(req.body).join(', ')}`);
+  }
+  next();
+});
+
 // In-memory OAuth client store (in production use database)
 const registeredClients: Record<string, any> = {};
 const validTokens: Set<string> = new Set();
