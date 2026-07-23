@@ -1,6 +1,11 @@
 {
   "buildCommand": "",
   "outputDirectory": ".",
+  "functions": {
+    "api/index.ts": {
+      "externalNodeModules": ["@supabase/supabase-js"]
+    }
+  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ]
