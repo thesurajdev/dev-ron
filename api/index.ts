@@ -24,22 +24,13 @@ app.get(['/api/mcp/manifest', '/manifest'], async (_req: any, res: any) => {
   }
 });
 
-// MCP endpoint - GET/HEAD returns manifest (for validation), POST handles requests
+// MCP endpoint - GET returns manifest (for validation), POST handles requests
 app.get(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
   try {
     const { getMcpManifest } = await import('../src/mcp/server-v2.js');
     res.json(getMcpManifest());
   } catch (err: any) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-app.head(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
-  try {
-    await import('../src/mcp/server-v2.js');
-    res.status(200).end();
-  } catch (err: any) {
-    res.status(500).end();
   }
 });
 
