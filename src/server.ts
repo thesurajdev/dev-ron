@@ -2,8 +2,8 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { handleMCPRequest } from './mcp/handler.js';
-import { getMcpManifest } from './mcp/server-v2.js';
+import { handleMCPRequest } from './mcp/handler';
+import { getMcpManifest } from './mcp/server-v2';
 
 dotenv.config();
 
