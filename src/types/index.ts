@@ -203,7 +203,7 @@ export interface MergeEntitiesInput {
 export interface GetTimelineInput {
   user_id: string;
   entity_id?: string; // Specific entity, or all activities if not provided
-  period: 'day' | 'week' | 'month' | 'year';
+  period?: 'day' | 'week' | 'month' | 'year'; // Defaults to 'day'
   date?: string;
 }
 
@@ -226,6 +226,6 @@ export interface GetMetricsInput {
   user_id: string;
   metric_names?: string[];
   entity_id?: string;
-  period: 'day' | 'week' | 'month' | 'year';
+  period?: 'day' | 'week' | 'month' | 'year'; // Defaults to 'day'
   date?: string;
 }

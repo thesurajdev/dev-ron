@@ -182,9 +182,9 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_timeline: async (input: GetTimelineInput) => {
     try {
-      const { user_id, entity_id, period, date } = input;
+      const { user_id, entity_id, period = 'day', date } = input;
 
-      let dateRange = getDateRange(period, date);
+      let dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
       const activities = await getActivities(
         user_id,
         dateRange.start,
@@ -357,9 +357,9 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_metrics: async (input: GetMetricsInput) => {
     try {
-      const { user_id, metric_names, entity_id, period, date } = input;
+      const { user_id, metric_names, entity_id, period = 'day', date } = input;
 
-      let dateRange = getDateRange(period, date);
+      let dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
       const metrics = await getMetrics(
         user_id,
         dateRange.start,
