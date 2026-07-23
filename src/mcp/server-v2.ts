@@ -409,6 +409,15 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
           let subjectCandidates = await searchEntities(user_id, subjectQuery, 'person');
           if (!explicitUserScope && subjectCandidates.length === 0) {
             subjectCandidates = await searchEntitiesAnyUser(subjectQuery, 'person');
+            if (subjectCandidates.length === 0) {
+              const people = await listEntitiesAll('person', 500);
+              subjectCandidates = people.filter((p: any) => {
+                const haystack = normalizeText(
+                  [p.entity_type, p.tags?.join(' '), JSON.stringify(p.data || {})].join(' ')
+                );
+                return matchesAllTokens(haystack, subjectTokens);
+              });
+            }
           }
 
           if (subjectCandidates.length > 0) {
