@@ -17,6 +17,30 @@ function sanitizeSearchQuery(query: string): string {
     .trim();
 }
 
+function tokenizeSearchQuery(query: string): string[] {
+  return sanitizeSearchQuery(query)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+}
+
+function objectMatchesTokens(candidate: any, tokens: string[]): boolean {
+  if (tokens.length === 0) return true;
+
+  const haystack = [
+    candidate?.entity_type,
+    (candidate?.tags || []).join(' '),
+    JSON.stringify(candidate?.data || {}),
+    JSON.stringify(candidate?.related_to || []),
+  ]
+    .map((v) => normalizePrimitive(v))
+    .join(' ');
+
+  const matched = tokens.filter((t) => haystack.includes(t)).length;
+  if (tokens.length <= 2) return matched >= 1;
+  return matched >= Math.ceil(tokens.length * 0.6);
+}
+
 function isPlainObject(value: any): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -373,6 +397,7 @@ export async function searchEntities(
 ) {
   const safeQuery = sanitizeSearchQuery(query);
   if (!safeQuery) return [];
+  const tokens = tokenizeSearchQuery(safeQuery);
 
   let q = supabase
     .from('entities')
@@ -391,35 +416,24 @@ export async function searchEntities(
   const { data, error } = await q.limit(50);
 
   if (error) throw error;
-  return data || [];
-}
 
-/**
- * Search entities across all user scopes.
- * Used as fallback when caller did not explicitly provide user_id.
- */
-export async function searchEntitiesAnyUser(
-  query: string,
-  entityType?: string,
-  limit = 100
-) {
-  const safeQuery = sanitizeSearchQuery(query);
-  if (!safeQuery) return [];
-
-  let q = supabase.from('entities').select('*');
-
-  if (entityType) {
-    q = q.eq('entity_type', entityType);
+  const indexedResults = data || [];
+  if (indexedResults.length >= 10) {
+    return indexedResults;
   }
 
-  q = q.or(
-    `data->>name.ilike.%${safeQuery}%,data->>email.ilike.%${safeQuery}%,data->>phone.ilike.%${safeQuery}%,data->>company.ilike.%${safeQuery}%`
-  );
+  // Fallback for schema-less matching: scan recent tenant objects and match on full payload.
+  const broadCandidates = await listEntitiesByUser(userId, entityType, 400);
+  const fallback = broadCandidates.filter((row: any) => objectMatchesTokens(row, tokens));
 
-  const { data, error } = await q.limit(limit);
-  if (error) throw error;
-  return data || [];
+  const byId = new Map<string, any>();
+  [...indexedResults, ...fallback].forEach((row: any) => {
+    if (row?.id && !byId.has(row.id)) byId.set(row.id, row);
+  });
+
+  return Array.from(byId.values()).slice(0, 50);
 }
+
 
 /**
  * List entities for a user (used for broad fallback search over flexible JSON fields)
@@ -433,29 +447,6 @@ export async function listEntitiesByUser(
     .from('entities')
     .select('*')
     .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
-    .limit(limit);
-
-  if (entityType) {
-    q = q.eq('entity_type', entityType);
-  }
-
-  const { data, error } = await q;
-  if (error) throw error;
-  return data || [];
-}
-
-/**
- * List entities across all user scopes.
- * Used as fallback when caller did not explicitly provide user_id.
- */
-export async function listEntitiesAll(
-  entityType?: string,
-  limit = 500
-) {
-  let q = supabase
-    .from('entities')
-    .select('*')
     .order('updated_at', { ascending: false })
     .limit(limit);
 
@@ -701,11 +692,11 @@ export async function mergeEntities(
     throw new Error('Could not find entities to merge');
   }
 
-  // Merge data (keep existing if both have values)
-  const mergedData = { ...duplicate.data, ...primary.data };
+  // Deep merge preserves nested fields and de-duplicates arrays.
+  const mergedData = deepMergeData(duplicate.data || {}, primary.data || {});
 
   // Merge history
-  const mergedHistory = [...(primary.history || []), ...(duplicate.history || [])];
+  const mergedHistory = uniqueArray([...(primary.history || []), ...(duplicate.history || [])]);
 
   // Merge relationships
   const mergedRelations = [
@@ -714,8 +705,8 @@ export async function mergeEntities(
   ];
 
   // Remove duplicates
-  const uniqueRelations = Array.from(
-    new Map(mergedRelations.map((r: any) => [r.entity_id, r])).values()
+  const uniqueRelations = uniqueArray(
+    Array.from(new Map(mergedRelations.map((r: any) => [r.entity_id, r])).values())
   );
 
   // Update primary
