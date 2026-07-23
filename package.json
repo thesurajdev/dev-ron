@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:server": "tsx examples/server.ts",
+    "setup-db": "tsx setup-db.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
