@@ -9,6 +9,7 @@
     "setup-db": "tsx setup-db.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "mcp": "tsx src/mcp/stdio-server.ts",
     "test": "vitest",
     "type-check": "tsc --noEmit"
   },
