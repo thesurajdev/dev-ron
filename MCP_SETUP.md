@@ -18,7 +18,7 @@ In Claude.ai Settings → Connectors:
 1. **Click "Add custom connector"** (or if RON exists, remove it first)
 2. Fill in:
    - **Name:** Dev-Ron
-   - **Remote MCP server URL:** `https://ron.surajdev.com/api/mcp`
+   - **Remote MCP server URL:** `https://your-domain.com/api/mcp`
 3. Click "Add"
 4. When it asks to "Connect", click "Connect"
 
@@ -35,7 +35,7 @@ The endpoint is ready. All 10 tools will be available immediately.
 
 **Try Option A: Remove and Re-add**
 1. Remove the connector (3-dot menu → Remove)
-2. Add it again with exact URL: `https://ron.surajdev.com/api/mcp`
+2. Add it again with exact URL: `https://your-domain.com/api/mcp`
 3. Click "Connect" again
 
 **Try Option B: Use Alternative Endpoint**
@@ -103,9 +103,9 @@ Once connected, you can ask Claude:
 ## Troubleshooting
 
 ### "Couldn't connect to server"
-- Verify the URL is correct and accessible: `https://ron.surajdev.com/api/mcp`
-- Check CORS is enabled (it is on our deployment)
-- Try hitting the endpoint directly: `curl https://ron.surajdev.com/api/mcp`
+- Verify the URL is correct and accessible: `https://your-domain.com/api/mcp`
+- Check CORS is enabled on your deployment
+- Try hitting the endpoint directly: `curl https://your-domain.com/api/mcp`
 
 ### "OAuth error"
 - This server uses OAuth for `POST /api/mcp` requests.
@@ -113,7 +113,7 @@ Once connected, you can ask Claude:
 - If authorization fails, reconnect the connector and retry.
 
 ### "Tool not found"
-- Verify you're using the correct endpoint: `https://ron.surajdev.com/api/mcp`
+- Verify you're using the correct endpoint: `https://your-domain.com/api/mcp`
 - Check that all 10 tools are listed when you connect
 
 ## API Endpoints

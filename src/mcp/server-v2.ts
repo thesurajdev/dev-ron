@@ -644,11 +644,12 @@ function getDateRange(period: 'day' | 'week' | 'month' | 'year', referenceDate?:
  * Get MCP manifest
  */
 export function getMcpManifest() {
+  const baseUrl = (process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
   return {
     protocol: 'mcp',
     version: '2.0.0',
     server_name: 'dev-ron AI Business OS MCP',
-    server_url: 'https://ron.surajdev.com/api/mcp',
+    server_url: `${baseUrl}/api/mcp`,
     name: 'dev-ron AI Business OS MCP',
     description:
       'AI-native business operating system memory interface that transforms raw input into connected business knowledge',

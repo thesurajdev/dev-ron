@@ -11,6 +11,21 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Support form-encoded OAuth requests
 
+function resolveBaseUrl(req?: any): string {
+  const configured = process.env.PUBLIC_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  const host = req?.headers?.host;
+  const proto = req?.headers?.['x-forwarded-proto'] || 'https';
+  if (host) {
+    return `${proto}://${host}`;
+  }
+
+  return 'http://localhost:3000';
+}
+
 // Explicit CORS preflight handlers
 app.options('*', cors());
 
@@ -189,11 +204,12 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
 
 // OAuth 2.0 Discovery - RFC 8414 - CRITICAL: Includes registration_endpoint
 app.get('/.well-known/oauth-authorization-server', (_req: any, res: any) => {
+  const baseUrl = resolveBaseUrl(_req);
   res.json({
-    issuer: 'https://ron.surajdev.com',
-    authorization_endpoint: 'https://ron.surajdev.com/oauth/authorize',
-    token_endpoint: 'https://ron.surajdev.com/oauth/token',
-    registration_endpoint: 'https://ron.surajdev.com/oauth/register',
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/oauth/authorize`,
+    token_endpoint: `${baseUrl}/oauth/token`,
+    registration_endpoint: `${baseUrl}/oauth/register`,
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'client_credentials'],
     client_types_supported: ['public', 'confidential'],
@@ -205,9 +221,10 @@ app.get('/.well-known/oauth-authorization-server', (_req: any, res: any) => {
 
 // OAuth Protected Resource Metadata (RFC 9728)
 app.get(['/.well-known/oauth-protected-resource', '/api/mcp/.well-known/oauth-protected-resource'], (_req: any, res: any) => {
+  const baseUrl = resolveBaseUrl(_req);
   res.json({
-    resource: 'https://ron.surajdev.com/api/mcp',
-    authorization_servers: ['https://ron.surajdev.com'],
+    resource: `${baseUrl}/api/mcp`,
+    authorization_servers: [baseUrl],
     scopes_supported: ['mcp:read', 'mcp:write'],
     bearer_methods_supported: ['header'],
   });

@@ -130,8 +130,8 @@ curl -X POST http://localhost:3000/api/mcp \
 ## Environment
 
 ```
-SUPABASE_URL=https://kclngegrgehogphtxeof.supabase.co
-SUPABASE_ANON_KEY=sb_publishable_9MUdeqG09COaGHoF1Wf6Vw_7KtnVs1z
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key_here
 NODE_ENV=development
 PORT=3000
 ```
