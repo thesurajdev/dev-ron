@@ -158,7 +158,7 @@ export interface GetRelatedInput {
  */
 export interface GetSummaryInput {
   user_id: string;
-  period: 'day' | 'week' | 'month' | 'year';
+  period?: 'day' | 'week' | 'month' | 'year'; // Defaults to 'day'
   date?: string; // Reference date (defaults to today)
   entity_id?: string; // Specific entity, or all if not provided
   entity_type?: string; // Filter by entity type

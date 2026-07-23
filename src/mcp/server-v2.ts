@@ -213,9 +213,9 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_summary: async (input: GetSummaryInput) => {
     try {
-      const { user_id, period, date, entity_id, entity_type } = input;
+      const { user_id, period = 'day', date, entity_id, entity_type } = input;
 
-      let dateRange = getDateRange(period, date);
+      let dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
 
       const activities = await getActivities(
         user_id,
