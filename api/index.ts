@@ -9,6 +9,10 @@ const crypto = require('crypto');
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // Support form-encoded OAuth requests
+
+// Explicit CORS preflight handlers
+app.options('*', cors());
 
 // Request logging middleware
 app.use((req: any, res: any, next: any) => {
@@ -269,6 +273,31 @@ app.get('/oauth/authorize', (req: any, res: any) => {
   }
 });
 
+// OAuth direct code endpoint - for clients that can't follow redirects
+app.post('/oauth/authorize', (req: any, res: any) => {
+  try {
+    const { client_id, scope = 'mcp:read mcp:write' } = req.body;
+
+    // Verify client exists
+    const client = registeredClients[client_id];
+    if (!client) {
+      return res.status(400).json({ error: 'unauthorized_client' });
+    }
+
+    // Generate and return authorization code directly (no redirect)
+    const redirect_uri = client.redirect_uris[0]; // Use first registered URI
+    const code = generateAuthCode(client_id, redirect_uri, scope);
+    
+    res.json({
+      authorization_code: code,
+      scope,
+      expires_in: 600, // 10 minutes
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: 'server_error', error_description: err.message });
+  }
+});
+
 // SSE endpoint for Claude.ai Remote MCP connection
 app.get('/sse', (req: any, res: any) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -288,6 +317,12 @@ app.get('/sse', (req: any, res: any) => {
   }, 30000);
 
   req.on('close', () => clearInterval(heartbeat));
+});
+
+// Catch-all 404 handler to log unhandled requests
+app.use((_req: any, res: any) => {
+  console.warn(`[Unhandled] ${_req.method} ${_req.path}`);
+  res.status(404).json({ error: 'not_found', path: _req.path, method: _req.method });
 });
 
 module.exports = app;
