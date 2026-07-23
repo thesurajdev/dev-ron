@@ -93,24 +93,47 @@ app.get(['/api/mcp/manifest', '/manifest'], async (_req: any, res: any) => {
 // MCP endpoint - GET returns manifest (NO AUTH - must be accessible for Claude to validate)
 app.get(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
   try {
+    console.log('[MCP GET] Request received');
+    
     const module = await import('../src/mcp/server-v2.js');
     const manifest = module.getMcpManifest();
+    
+    console.log('[MCP GET] Manifest has', manifest.tools?.length || 0, 'tools');
+    
+    // Verify structure
+    if (!manifest.tools || !Array.isArray(manifest.tools)) {
+      console.error('[MCP GET] Invalid manifest structure');
+      return res.status(500).json({ error: 'Invalid manifest structure' });
+    }
+    
+    res.setHeader('Content-Type', 'application/json');
     res.json(manifest);
   } catch (err: any) {
     console.error('[MCP GET] Error:', err.message);
-    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    console.error('[MCP GET] Stack:', err.stack);
+    res.status(500).json({ 
+      error: 'Server error',
+      message: err.message,
+      type: err.name
+    });
   }
 });
 
 app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
   try {
-    console.log('[MCP POST] Request received, body:', req.body?.method || req.body?.tool);
+    const startTime = Date.now();
+    console.log('[MCP POST] Request received');
+    console.log('[MCP POST] Method:', req.body?.method);
+    console.log('[MCP POST] Tool:', req.body?.tool);
+    console.log('[MCP POST] Body keys:', Object.keys(req.body || {}));
+    console.log('[MCP POST] Auth header:', req.headers.authorization ? 'YES' : 'NO');
     
     // Import handler
     let handler;
     try {
       const module = await import('../src/mcp/handler.js');
       handler = module.handleMCPRequest;
+      console.log('[MCP POST] Handler loaded successfully');
     } catch (importErr: any) {
       console.error('[MCP POST] Import error:', importErr.message);
       return res.status(500).json({ 
@@ -120,14 +143,16 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
     }
     
     if (!handler) {
-      console.error('[MCP POST] Handler not found');
+      console.error('[MCP POST] Handler function not found');
       return res.status(500).json({ error: 'Handler not available' });
     }
     
     // Call handler
+    console.log('[MCP POST] Calling handler...');
     const response = await handler(req.body);
     
-    console.log('[MCP POST] Success');
+    const duration = Date.now() - startTime;
+    console.log(`[MCP POST] Success in ${duration}ms`);
     
     // Set proper headers
     res.setHeader('Content-Type', 'application/json');
@@ -135,10 +160,12 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
     
     res.json(response);
   } catch (err: any) {
-    console.error('[MCP POST] Unhandled error:', err);
+    console.error('[MCP POST] Unhandled error:', err.message);
+    console.error('[MCP POST] Stack:', err.stack);
     res.status(500).json({ 
       error: 'Internal Server Error',
-      message: err?.message || 'Unknown error'
+      message: err?.message || 'Unknown error',
+      type: err?.name || 'Error'
     });
   }
 });
