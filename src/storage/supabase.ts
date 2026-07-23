@@ -378,6 +378,30 @@ export async function searchEntities(
 }
 
 /**
+ * Search entities across all user scopes.
+ * Used as fallback when caller did not explicitly provide user_id.
+ */
+export async function searchEntitiesAnyUser(
+  query: string,
+  entityType?: string,
+  limit = 100
+) {
+  let q = supabase.from('entities').select('*');
+
+  if (entityType) {
+    q = q.eq('entity_type', entityType);
+  }
+
+  q = q.or(
+    `data->>name.ilike.%${query}%,data->>email.ilike.%${query}%,data->>phone.ilike.%${query}%,data->>company.ilike.%${query}%`
+  );
+
+  const { data, error } = await q.limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+/**
  * List entities for a user (used for broad fallback search over flexible JSON fields)
  */
 export async function listEntitiesByUser(
@@ -389,6 +413,29 @@ export async function listEntitiesByUser(
     .from('entities')
     .select('*')
     .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+
+  if (entityType) {
+    q = q.eq('entity_type', entityType);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * List entities across all user scopes.
+ * Used as fallback when caller did not explicitly provide user_id.
+ */
+export async function listEntitiesAll(
+  entityType?: string,
+  limit = 500
+) {
+  let q = supabase
+    .from('entities')
+    .select('*')
     .order('updated_at', { ascending: false })
     .limit(limit);
 

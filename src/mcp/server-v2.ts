@@ -8,7 +8,9 @@ import {
   updateEntity,
   getEntity,
   searchEntities,
+  searchEntitiesAnyUser,
   listEntitiesByUser,
+  listEntitiesAll,
   getRelatedEntities,
   addActivity,
   getActivities,
@@ -46,6 +48,13 @@ function withUserId<T extends { user_id?: string }>(input: T): T & { user_id: st
   return {
     ...input,
     user_id: input?.user_id || DEFAULT_MCP_USER_ID,
+  };
+}
+
+function resolveUserScope<T extends { user_id?: string }>(input: T) {
+  return {
+    explicitUserScope: Boolean(input?.user_id),
+    normalized: withUserId(input),
   };
 }
 
@@ -155,7 +164,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_entity: async (input: GetEntityInput) => {
     try {
-      const normalized = withUserId(input);
+      const { normalized, explicitUserScope } = resolveUserScope(input);
       const { user_id, entity_id, search_query, entity_type, include_history } = normalized;
 
       let results: any[] = [];
@@ -165,6 +174,9 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
         results = [entity];
       } else if (search_query) {
         results = await searchEntities(user_id, search_query, entity_type);
+        if (!explicitUserScope && results.length === 0) {
+          results = await searchEntitiesAnyUser(search_query, entity_type);
+        }
       } else {
         return response(false, null, 'Must provide either entity_id or search_query');
       }
@@ -326,7 +338,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   search: async (input: SearchInput) => {
     try {
-      const normalized = withUserId(input);
+      const { normalized, explicitUserScope } = resolveUserScope(input);
       const { user_id, query, entity_type, limit = 50 } = normalized;
 
       const tokens = tokenizeQuery(query);
@@ -348,9 +360,27 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
         return matchesAllTokens(haystack, tokens);
       });
 
+      let crossScopeIndexed: any[] = [];
+      let crossScopeFallback: any[] = [];
+      if (!explicitUserScope && indexedResults.length === 0 && fallbackResults.length === 0) {
+        crossScopeIndexed = await searchEntitiesAnyUser(query, entity_type, Math.max(limit * 3, 100));
+        const allEntitiesAnyScope = await listEntitiesAll(entity_type, Math.max(limit * 5, 200));
+        crossScopeFallback = allEntitiesAnyScope.filter((e: any) => {
+          const haystack = [
+            e.entity_type,
+            e.tags?.join(' '),
+            JSON.stringify(e.data || {}),
+            JSON.stringify(e.related_to || []),
+          ]
+            .map(normalizeText)
+            .join(' ');
+          return matchesAllTokens(haystack, tokens);
+        });
+      }
+
       // Merge and de-duplicate
       const byId = new Map<string, any>();
-      [...indexedResults, ...fallbackResults].forEach((r: any) => {
+      [...indexedResults, ...fallbackResults, ...crossScopeIndexed, ...crossScopeFallback].forEach((r: any) => {
         if (r?.id && !byId.has(r.id)) byId.set(r.id, r);
       });
       const mergedResults = Array.from(byId.values());
