@@ -3,7 +3,7 @@
   "outputDirectory": ".",
   "functions": {
     "api/index.ts": {
-      "externalNodeModules": ["@supabase/supabase-js"]
+      "externalNodeModules": ["@supabase/supabase-js", "express", "cors", "dotenv", "uuid"]
     }
   },
   "rewrites": [
