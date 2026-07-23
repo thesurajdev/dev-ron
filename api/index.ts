@@ -157,6 +157,16 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
     // Set proper headers
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-cache');
+
+    // JSON-RPC notifications do not require response bodies.
+    if (req.body?.jsonrpc === '2.0' && typeof req.body?.id === 'undefined') {
+      return res.status(202).end();
+    }
+
+    // Allow handlers to opt out of sending a payload.
+    if (!response || (typeof response === 'object' && Object.keys(response).length === 0)) {
+      return res.status(204).end();
+    }
     
     res.json(response);
   } catch (err: any) {
@@ -183,6 +193,16 @@ app.get('/.well-known/oauth-authorization-server', (_req: any, res: any) => {
     code_challenge_methods_supported: ['S256', 'plain'],
     scopes_supported: ['mcp:read', 'mcp:write'],
     token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
+  });
+});
+
+// OAuth Protected Resource Metadata (RFC 9728)
+app.get(['/.well-known/oauth-protected-resource', '/api/mcp/.well-known/oauth-protected-resource'], (_req: any, res: any) => {
+  res.json({
+    resource: 'https://ron.surajdev.com/api/mcp',
+    authorization_servers: ['https://ron.surajdev.com'],
+    scopes_supported: ['mcp:read', 'mcp:write'],
+    bearer_methods_supported: ['header'],
   });
 });
 

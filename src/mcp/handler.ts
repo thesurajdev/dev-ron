@@ -10,7 +10,13 @@ export interface MCPRequest {
   jsonrpc?: string;
   id?: string | number;
   method?: string;
-  params?: { name?: string; arguments?: Record<string, any> };
+  params?: {
+    name?: string;
+    arguments?: Record<string, any>;
+    protocolVersion?: string;
+    capabilities?: Record<string, any>;
+    clientInfo?: { name?: string; version?: string };
+  };
   tool?: string;
   input?: Record<string, any>;
 }
@@ -31,12 +37,60 @@ export async function handleMCPRequest(req: MCPRequest): Promise<MCPResponse> {
   try {
     // Handle JSON-RPC 2.0 format
     if (req.jsonrpc === '2.0') {
+      if (req.method === 'initialize') {
+        const manifest = getMcpManifest();
+        return {
+          jsonrpc: '2.0',
+          id: req.id,
+          result: {
+            protocolVersion: req.params?.protocolVersion || '2024-11-05',
+            capabilities: {
+              tools: {
+                listChanged: false,
+              },
+              resources: {
+                subscribe: false,
+                listChanged: false,
+              },
+            },
+            serverInfo: {
+              name: manifest.server_name || manifest.name,
+              version: manifest.version,
+            },
+            instructions: manifest.description,
+          },
+        };
+      }
+
+      if (req.method === 'notifications/initialized') {
+        // JSON-RPC notification: no response body needed.
+        return {};
+      }
+
+      if (req.method === 'ping') {
+        return {
+          jsonrpc: '2.0',
+          id: req.id,
+          result: {},
+        };
+      }
+
       if (req.method === 'tools/list') {
         return {
           jsonrpc: '2.0',
           id: req.id,
           result: {
             tools: getMcpManifest().tools,
+          },
+        };
+      }
+
+      if (req.method === 'resources/list') {
+        return {
+          jsonrpc: '2.0',
+          id: req.id,
+          result: {
+            resources: getMcpManifest().resources || [],
           },
         };
       }
