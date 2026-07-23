@@ -44,5 +44,35 @@ app.post(['/api/mcp', '/mcp'], async (req: any, res: any) => {
   }
 });
 
+// OAuth 2.0 Discovery - so Claude.ai can recognize this as an OAuth-capable server
+app.get('/.well-known/oauth-authorization-server', (_req: any, res: any) => {
+  res.json({
+    issuer: 'https://ron.surajdev.com',
+    authorization_endpoint: 'https://ron.surajdev.com/oauth/authorize',
+    token_endpoint: 'https://ron.surajdev.com/oauth/token',
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code'],
+  });
+});
+
+// OAuth token endpoint - returns immediate access without requiring auth
+app.post('/oauth/token', (req: any, res: any) => {
+  res.json({
+    access_token: 'mcp-token-' + Date.now(),
+    token_type: 'Bearer',
+    expires_in: 86400,
+  });
+});
+
+// OAuth authorization endpoint - just redirect back
+app.get('/oauth/authorize', (req: any, res: any) => {
+  const { redirect_uri, state } = req.query;
+  const code = 'code-' + Date.now();
+  const redirectUrl = new URL(redirect_uri);
+  redirectUrl.searchParams.set('code', code);
+  redirectUrl.searchParams.set('state', state);
+  res.redirect(redirectUrl.toString());
+});
+
 module.exports = app;
 
