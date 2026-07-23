@@ -8,6 +8,7 @@ import {
   updateEntity,
   getEntity,
   searchEntities,
+  listEntitiesByUser,
   getRelatedEntities,
   addActivity,
   getActivities,
@@ -46,6 +47,15 @@ function withUserId<T extends { user_id?: string }>(input: T): T & { user_id: st
     ...input,
     user_id: input?.user_id || DEFAULT_MCP_USER_ID,
   };
+}
+
+function normalizeText(value: any): string {
+  if (value === null || value === undefined) return '';
+  return String(value).toLowerCase();
+}
+
+function matchesAllTokens(text: string, tokens: string[]): boolean {
+  return tokens.every((t) => text.includes(t));
 }
 
 /**
@@ -292,12 +302,70 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       const normalized = withUserId(input);
       const { user_id, query, entity_type, limit = 50 } = normalized;
 
-      const results = await searchEntities(user_id, query, entity_type);
+      const rawQuery = normalizeText(query).trim();
+      const tokens = rawQuery.split(/\s+/).filter(Boolean);
+
+      // First pass: indexed field search (fast)
+      const indexedResults = await searchEntities(user_id, query, entity_type);
+
+      // Fallback pass: scan flexible JSON payloads so non-name fields are discoverable.
+      const allEntities = await listEntitiesByUser(user_id, entity_type, Math.max(limit * 5, 200));
+      const fallbackResults = allEntities.filter((e: any) => {
+        const haystack = [
+          e.entity_type,
+          e.tags?.join(' '),
+          JSON.stringify(e.data || {}),
+          JSON.stringify(e.related_to || []),
+        ]
+          .map(normalizeText)
+          .join(' ');
+        return matchesAllTokens(haystack, tokens);
+      });
+
+      // Merge and de-duplicate
+      const byId = new Map<string, any>();
+      [...indexedResults, ...fallbackResults].forEach((r: any) => {
+        if (r?.id && !byId.has(r.id)) byId.set(r.id, r);
+      });
+      const mergedResults = Array.from(byId.values());
+
+      // Booking intent summary (e.g., "pending caricature booking")
+      const bookingIntent = tokens.some((t) => t.includes('booking')) || tokens.some((t) => t.includes('order'));
+      const pendingIntent = tokens.includes('pending');
+      let intentSummary: Record<string, any> | undefined;
+
+      if (bookingIntent) {
+        const bookingTypeToken = tokens.find((t) =>
+          !['pending', 'booking', 'bookings', 'order', 'orders', 'how', 'many', 'have', 'we'].includes(t)
+        );
+
+        const bookingCandidates = mergedResults.filter((e: any) => {
+          const blob = normalizeText(
+            [e.entity_type, e.tags?.join(' '), JSON.stringify(e.data || {})].join(' ')
+          );
+          const hasBooking = blob.includes('booking') || blob.includes('order');
+          const hasType = bookingTypeToken ? blob.includes(bookingTypeToken) : true;
+          return hasBooking && hasType;
+        });
+
+        const pendingCount = bookingCandidates.filter((e: any) => {
+          const status = normalizeText(e?.data?.status || e?.data?.booking_status || e?.data?.state || '');
+          return pendingIntent ? status.includes('pending') : true;
+        }).length;
+
+        intentSummary = {
+          query_type: 'booking_summary',
+          booking_type: bookingTypeToken || null,
+          pending_count: pendingIntent ? pendingCount : undefined,
+          matched_bookings: bookingCandidates.length,
+        };
+      }
 
       return response(true, {
         query,
-        count: Math.min(results.length, limit),
-        results: results.slice(0, limit).map((r) => ({
+        count: Math.min(mergedResults.length, limit),
+        summary: intentSummary,
+        results: mergedResults.slice(0, limit).map((r) => ({
           id: r.id,
           type: r.entity_type,
           data: r.data,

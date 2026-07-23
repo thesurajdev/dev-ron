@@ -213,6 +213,30 @@ export async function searchEntities(
 }
 
 /**
+ * List entities for a user (used for broad fallback search over flexible JSON fields)
+ */
+export async function listEntitiesByUser(
+  userId: string,
+  entityType?: string,
+  limit = 500
+) {
+  let q = supabase
+    .from('entities')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+
+  if (entityType) {
+    q = q.eq('entity_type', entityType);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+/**
  * Get related entities
  */
 export async function getRelatedEntities(
