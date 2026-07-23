@@ -64,11 +64,30 @@ function normalizeText(value: any): string {
 }
 
 function matchesAllTokens(text: string, tokens: string[]): boolean {
-  return tokens.every((t) => text.includes(t));
+  if (tokens.length === 0) return true;
+
+  const matchedCount = tokens.filter((t) => text.includes(t)).length;
+
+  // For short name-like queries, allow partial token matches (e.g. "suraj dev" when only "suraj" exists).
+  if (tokens.length <= 2) {
+    return matchedCount >= 1;
+  }
+
+  // For longer natural-language queries, require a strong majority of token matches.
+  const minMatches = Math.ceil(tokens.length * 0.6);
+  return matchedCount >= minMatches;
 }
 
 function tokenizeQuery(query: string): string[] {
   const stopwords = new Set([
+    'do',
+    'you',
+    'know',
+    'me',
+    'about',
+    'tell',
+    'please',
+    'ron',
     'how',
     'many',
     'what',
