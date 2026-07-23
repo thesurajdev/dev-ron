@@ -27,20 +27,20 @@ Then in Claude.ai:
    - **macOS/Linux:** `command://npx dev-ron@latest mcp`
    - Or install globally: `npm install -g dev-ron` then use `command://dev-ron-mcp`
 
-### Option 2: Using Vercel-Hosted HTTP Endpoint
+### Option 2: Using Custom Domain Endpoint
 
 Claude.ai also supports HTTP-based MCP servers.
 
 **Use this URL:** 
 ```
-https://dev-ron.vercel.app/api/mcp
+https://ron.surajdev.com/api/mcp
 ```
 
 In Claude.ai:
 1. Go to Settings → Connectors
 2. Click "Add custom connector"
 3. Name: `Dev-Ron Data Logger`
-4. Remote MCP server URL: `https://dev-ron.vercel.app/api/mcp`
+4. Remote MCP server URL: `https://ron.surajdev.com/api/mcp`
 5. Leave OAuth fields empty (not required)
 6. Click "Add"
 
@@ -118,16 +118,16 @@ Once connected, you can ask Claude:
 ## Troubleshooting
 
 ### "Couldn't connect to server"
-- Verify the URL is correct and accessible
-- Check CORS is enabled (it is on our Vercel deployment)
-- Try hitting the endpoint directly: `curl https://dev-ron.vercel.app/api/mcp`
+- Verify the URL is correct and accessible: `https://ron.surajdev.com/api/mcp`
+- Check CORS is enabled (it is on our deployment)
+- Try hitting the endpoint directly: `curl https://ron.surajdev.com/api/mcp`
 
 ### "OAuth error"
 - Leave OAuth Client ID and Secret empty (not required for this server)
 - These fields are optional per the dialog
 
 ### "Tool not found"
-- Verify you're using the correct endpoint: `https://dev-ron.vercel.app/api/mcp`
+- Verify you're using the correct endpoint: `https://ron.surajdev.com/api/mcp`
 - Check that all 10 tools are listed when you connect
 
 ## API Endpoints
