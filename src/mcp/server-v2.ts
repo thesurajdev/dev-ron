@@ -539,16 +539,16 @@ export function getMcpManifest() {
   return {
     protocol: 'mcp',
     version: '2.0.0',
-    server_name: 'Smart Data Logger MCP',
+    server_name: 'dev-ron AI Business OS MCP',
     server_url: 'https://ron.surajdev.com/api/mcp',
-    name: 'Smart Data Logger MCP',
+    name: 'dev-ron AI Business OS MCP',
     description:
-      'Flexible, schema-less MCP for storing any data with intelligent deduplication and entity relationships',
+      'AI-native business operating system memory interface that transforms raw input into connected business knowledge',
     tools: [
       {
         name: 'add_data',
         description:
-          'Add or update data (smart consolidation). Auto-detects existing entities and merges without duplication.',
+          'Ingest raw business input into memory. Extracts business objects and updates or merges existing knowledge without duplicates.',
         readOnlyHint: false,
         openWorldHint: false,
         destructiveHint: true,
@@ -574,7 +574,7 @@ export function getMcpManifest() {
       {
         name: 'get_entity',
         description:
-          'Get complete entity profile with all consolidated data (no duplicates). Includes full history.',
+          'Get a full business object profile with consolidated facts, relationships, and optional immutable history.',
         readOnlyHint: true,
         openWorldHint: false,
         destructiveHint: false,
@@ -597,7 +597,7 @@ export function getMcpManifest() {
       },
       {
         name: 'get_related',
-        description: 'Get all entities related to this one, with relationship types',
+        description: 'Get relationship graph neighbors for a business object, including relationship types.',
         readOnlyHint: true,
         openWorldHint: false,
         destructiveHint: false,
@@ -618,7 +618,7 @@ export function getMcpManifest() {
       },
       {
         name: 'get_timeline',
-        description: 'Get chronological timeline of all activities',
+        description: 'Get chronological event timeline for business actions across the selected scope.',
         readOnlyHint: true,
         openWorldHint: false,
         destructiveHint: false,
@@ -641,7 +641,7 @@ export function getMcpManifest() {
       {
         name: 'get_summary',
         description:
-          'Get consolidated summary for period. Complete without duplicates or missing data.',
+          'Get a reasoning-ready summary for a period from consolidated objects, events, and metrics.',
         readOnlyHint: true,
         openWorldHint: false,
         destructiveHint: false,
@@ -664,7 +664,7 @@ export function getMcpManifest() {
       },
       {
         name: 'search',
-        description: 'Smart search across all data fields',
+        description: 'Semantic search across schema-less business objects, relationships, and memory context.',
         readOnlyHint: true,
         openWorldHint: false,
         destructiveHint: false,
@@ -686,7 +686,7 @@ export function getMcpManifest() {
       },
       {
         name: 'link_entities',
-        description: 'Create relationship between two entities',
+        description: 'Create a typed relationship edge between two business objects in the knowledge graph.',
         readOnlyHint: false,
         openWorldHint: false,
         destructiveHint: true,
@@ -709,7 +709,7 @@ export function getMcpManifest() {
       },
       {
         name: 'merge_entities',
-        description: 'Merge duplicate entities (detected by system)',
+        description: 'Merge duplicate business objects into one canonical record while preserving history.',
         readOnlyHint: false,
         openWorldHint: false,
         destructiveHint: true,
@@ -730,7 +730,7 @@ export function getMcpManifest() {
       },
       {
         name: 'record_metric',
-        description: 'Record a KPI or metric value',
+        description: 'Record a business metric event and attach it to global or object-specific context.',
         readOnlyHint: false,
         openWorldHint: false,
         destructiveHint: true,
@@ -754,7 +754,7 @@ export function getMcpManifest() {
       },
       {
         name: 'get_metrics',
-        description: 'Get metrics for period',
+        description: 'Retrieve business metrics for a period to support operating insights and decisions.',
         readOnlyHint: true,
         openWorldHint: false,
         destructiveHint: false,
