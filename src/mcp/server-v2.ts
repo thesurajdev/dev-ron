@@ -420,6 +420,11 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       return response(true, {
         query,
         count: Math.min(mergedResults.length, limit),
+        scope_mode: explicitUserScope ? 'explicit_user_scope' : 'auto_scope_with_fallback',
+        no_result_reason:
+          mergedResults.length === 0
+            ? 'No matching business object found in current memory scope for this query.'
+            : undefined,
         summary: intentSummary,
         results: mergedResults.slice(0, limit).map((r) => ({
           id: r.id,
