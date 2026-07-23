@@ -134,4 +134,4 @@ For issues or questions:
 
 ---
 
-**Status:** ✅ Production-ready and deployed on Vercel
+**Status:** Template ready for self-hosted deployment

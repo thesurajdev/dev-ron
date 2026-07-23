@@ -9,12 +9,12 @@ import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_ANON_KEY || "";
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
 
 if (!supabaseUrl || !supabaseKey) {
   console.error("\n❌ Missing environment variables:\n");
   console.error("   SUPABASE_URL:", supabaseUrl ? "✓" : "✗ NOT SET");
-  console.error("   SUPABASE_ANON_KEY:", supabaseKey ? "✓" : "✗ NOT SET\n");
+  console.error("   SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY:", supabaseKey ? "✓" : "✗ NOT SET\n");
   console.error(
     "Please update .env file with your Supabase credentials.\n"
   );
@@ -111,7 +111,7 @@ async function setupDatabase() {
       "   • Check .env file exists with correct Supabase credentials"
     );
     console.log(
-      "   • Verify SUPABASE_URL and SUPABASE_ANON_KEY are set"
+      "   • Verify SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set"
     );
     console.log("   • Go to Supabase Dashboard → Settings → API\n");
     return false;

@@ -1,163 +1,52 @@
-# ⚡ Quick Start Guide
+# Quick Start
 
-## Issues Fixed ✅
-- **ISSUE**: .env had wrong environment variable name
-- **FIX**: Changed `SUPABASE_SERVICE_KEY` → `SUPABASE_ANON_KEY` ✅
+Use this file for the fastest setup path.
 
-## 5-Minute Setup
+## 1. Clone and install
 
-### 1️⃣ Create Database Schema (Supabase)
 ```bash
-# Go to: Supabase Console → SQL Editor
-# Copy SQL from SETUP_DATABASE.md (lines 6-109)
-# Paste and execute
-# ✅ Creates: entities, activities, metrics tables
+git clone https://github.com/your-org/dev-ron.git
+cd dev-ron
+npm install
+cp .env.example .env
 ```
 
-### 2️⃣ Start Server
+## 2. Configure environment
+
+Set in `.env`:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `PUBLIC_BASE_URL` (example: `https://your-domain.com`)
+
+## 3. Create database schema
+
+Run SQL from [SETUP_DATABASE.md](SETUP_DATABASE.md) in Supabase SQL Editor.
+
+## 4. Build and run
+
 ```bash
+npm run build
 npm run dev:server
-# Expected: ✅ MCP Server initialized
-#           🚀 dev-ron MCP server ready
 ```
 
-### 3️⃣ Test Health
+## 5. Verify
+
 ```bash
 curl http://localhost:3000/health
-# Expected: {"ok": true}
+curl http://localhost:3000/api/mcp
 ```
 
-## Test Smart Features
+## 6. Connect in Claude
 
-### Add Client (Create Entity)
-```bash
-curl -X POST http://localhost:3000/api/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "tools/call",
-    "params": {
-      "name": "add_data",
-      "arguments": {
-        "user_id": "user123",
-        "entity_type": "client",
-        "data": {
-          "name": "John Doe",
-          "email": "john@example.com",
-          "phone": "+1-555-0123"
-        }
-      }
-    }
-  }'
-```
+Use your deployed endpoint:
 
-### Test Deduplication
-```bash
-# Add SAME client with different data
-# (Should auto-consolidate)
-curl -X POST http://localhost:3000/api/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/call",
-    "params": {
-      "name": "add_data",
-      "arguments": {
-        "user_id": "user123",
-        "entity_type": "client",
-        "data": {
-          "name": "John Doe",
-          "email": "john@example.com",
-          "company": "Acme Corp"
-        }
-      }
-    }
-  }'
+- `https://your-domain.com/api/mcp`
 
-# Result: Single entity with name + email + company (consolidated)
-```
+Claude handles OAuth registration and token flow during connector setup.
 
-### Search
-```bash
-curl -X POST http://localhost:3000/api/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": {
-      "name": "search",
-      "arguments": {
-        "user_id": "user123",
-        "query": "john"
-      }
-    }
-  }'
-```
+## Canonical docs
 
-## 10 Available Tools
-
-1. **add_data** - Create/update entity (auto-consolidates)
-2. **get_entity** - Get complete profile
-3. **get_related** - Find related entities
-4. **get_timeline** - Activity history
-5. **get_summary** - Full summary + stats
-6. **search** - Full-text search
-7. **link_entities** - Create relationships
-8. **merge_entities** - Merge duplicates
-9. **record_metric** - Track metrics/KPIs
-10. **get_metrics** - Get metrics
-
-## Key Features
-
-✅ **Smart Deduplication**
-- Automatic duplicate detection
-- Match score algorithm (email, phone, name)
-- Auto-consolidates if score >60%
-
-✅ **Complete Data**
-- No duplicates or mess
-- Full history tracking
-- Bidirectional relationships
-
-✅ **Flexible Model**
-- Store any JSON data
-- Evolves with your business
-- Full-text search
-
-## Environment
-
-```
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your_anon_key_here
-NODE_ENV=development
-PORT=3000
-```
-
-## Scripts
-
-```bash
-npm run build        # Build TypeScript
-npm run dev:server   # Start dev server
-npm start            # Production (from dist)
-```
-
-## Status
-
-✅ Build: 0 errors
-✅ All 10 tools working
-✅ Smart deduplication active
-✅ Database: Ready (needs schema execution)
-✅ Environment: Configured
-
-## Need More Details?
-
-- **Setup**: See [SETUP_DATABASE.md](SETUP_DATABASE.md)
-- **Full Guide**: See [NEXT_STEPS.md](NEXT_STEPS.md)
-- **Architecture**: See [README.md](README.md)
-
----
-
-**Ready to go!** Start with Step 1 above. 🚀
+- Product and architecture: [README.md](README.md)
+- Database schema: [SETUP_DATABASE.md](SETUP_DATABASE.md)
+- Connector specifics: [MCP_SETUP.md](MCP_SETUP.md)

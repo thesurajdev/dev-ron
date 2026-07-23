@@ -133,6 +133,13 @@ Intelligence remains in the Memory Engine.
 
 ## Local Development
 
+### Documentation Map
+
+- Fast setup: [QUICK_START.md](QUICK_START.md)
+- Database schema: [SETUP_DATABASE.md](SETUP_DATABASE.md)
+- Claude connector setup: [MCP_SETUP.md](MCP_SETUP.md)
+- Improvement roadmap: [NEXT_STEPS.md](NEXT_STEPS.md)
+
 ### Prerequisites
 
 - Node.js 18+
@@ -165,6 +172,30 @@ npm run dev:server
 
 - GET `/api/mcp` (manifest/discovery)
 - POST `/api/mcp` (OAuth Bearer required for tool execution)
+
+## Go Live In 10 Minutes
+
+1. Create your own Supabase project.
+2. Run SQL from [SETUP_DATABASE.md](SETUP_DATABASE.md).
+3. Fork/clone this repo.
+4. Deploy to Vercel.
+5. Set environment variables in Vercel:
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY` (recommended for backend)
+  - `PUBLIC_BASE_URL` (example: `https://your-domain.com`)
+6. Redeploy.
+7. Verify:
+  - `GET https://your-domain.com/health`
+  - `GET https://your-domain.com/api/mcp`
+8. Connect in Claude using:
+  - `https://your-domain.com/api/mcp`
+
+### Why this is safe by default
+
+- Tool execution (`POST /api/mcp`) requires OAuth token.
+- Tenant scope is enforced server-side from token context.
+- Client-provided `user_id` is ignored when token scope is present.
+- Storage queries are scoped to tenant `user_id`.
 
 ## Public Deployment Security Checklist
 

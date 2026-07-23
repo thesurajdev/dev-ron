@@ -36,9 +36,9 @@ CREATE TABLE IF NOT EXISTS activities (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id TEXT NOT NULL,
   activity_type TEXT NOT NULL,
-  date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  date DATE DEFAULT CURRENT_DATE,
   data JSONB NOT NULL DEFAULT '{}',
-  involved_entities UUID[] DEFAULT ARRAY[]::UUID[],
+  involved_entities JSONB NOT NULL DEFAULT '[]',
   tags TEXT[] DEFAULT ARRAY[]::TEXT[],
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -54,9 +54,9 @@ CREATE TABLE IF NOT EXISTS metrics (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id TEXT NOT NULL,
   metric_name TEXT NOT NULL,
-  value NUMERIC NOT NULL,
+  value TEXT NOT NULL,
   entity_id UUID,
-  date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  date DATE DEFAULT CURRENT_DATE,
   tags TEXT[] DEFAULT ARRAY[]::TEXT[],
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -77,12 +77,15 @@ Create `.env` file in project root:
 
 ```env
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
 NODE_ENV=development
 PORT=3000
+PUBLIC_BASE_URL=https://your-domain.com
 ```
 
-Get these from Supabase Dashboard → Settings → API
+Get these from Supabase Dashboard → Settings → API.
+
+Use `SUPABASE_SERVICE_ROLE_KEY` on the server side only (never in client/browser code).
 
 ## 3. Start the Server
 
@@ -107,6 +110,10 @@ curl http://localhost:3000/api/mcp/manifest
 
 ### Add Data (Add Client)
 ```bash
+# NOTE: POST /api/mcp requires OAuth bearer token.
+# Use Claude connector flow for OAuth automatically,
+# or implement token exchange before direct curl tool calls.
+
 curl -X POST http://localhost:3000/api/mcp \
   -H "Content-Type: application/json" \
   -d '{
