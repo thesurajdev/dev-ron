@@ -59,7 +59,6 @@ function toMcpTool(tool: ManifestTool) {
 }
 
 function withRuntimeUserScope(args: Record<string, any>, context?: MCPRuntimeContext) {
-  if (args?.user_id) return args;
   if (!context?.userId) return args;
   return { ...args, user_id: context.userId };
 }

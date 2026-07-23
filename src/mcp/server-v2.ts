@@ -154,7 +154,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       }
 
       // Update entity with new data
-      await updateEntity(finalEntityId, data, activity_type);
+      await updateEntity(user_id, finalEntityId, data, activity_type);
 
       // Add activity if provided
       if (activity_type && activity_data) {
@@ -201,7 +201,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       let results: any[] = [];
 
       if (entity_id) {
-        const entity = await getEntity(entity_id);
+        const entity = await getEntity(user_id, entity_id);
         results = [entity];
       } else if (search_query) {
         results = await searchEntities(user_id, search_query, entity_type);
@@ -240,7 +240,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       const normalized = withUserId(input);
       const { user_id, entity_id, relationship_type } = normalized;
 
-      const mainEntity = await getEntity(entity_id);
+      const mainEntity = await getEntity(user_id, entity_id);
       const related = await getRelatedEntities(user_id, entity_id);
       const relationByEntityId = new Map<string, string>(
         (mainEntity?.related_to || []).map((r: any) => [r.entity_id, r.relationship_type])
@@ -420,7 +420,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
 
           if (subjectCandidates.length > 0) {
             const subject = subjectCandidates[0];
-            const subjectEntity = await getEntity(subject.id);
+              const subjectEntity = await getEntity(user_id, subject.id);
             const relationByEntityId = new Map<string, string>(
               (subjectEntity?.related_to || []).map((r: any) => [r.entity_id, r.relationship_type])
             );
@@ -540,7 +540,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       const normalized = withUserId(input);
       const { user_id, primary_entity_id, duplicate_entity_id } = normalized;
 
-      await mergeEntities(primary_entity_id, duplicate_entity_id);
+      await mergeEntities(user_id, primary_entity_id, duplicate_entity_id);
 
       return response(true, {
         message: 'Entities merged successfully',

@@ -152,7 +152,7 @@ Set environment variables in `.env`:
 
 - SUPABASE_URL
 - SUPABASE_ANON_KEY
-- DEFAULT_MCP_USER_ID (optional fallback scope)
+- DEFAULT_MCP_USER_ID (optional for local non-OAuth testing only)
 
 ### Run
 
@@ -163,7 +163,19 @@ npm run dev:server
 
 ### MCP Endpoint
 
-- GET/POST `/api/mcp`
+- GET `/api/mcp` (manifest/discovery)
+- POST `/api/mcp` (OAuth Bearer required for tool execution)
+
+## Public Deployment Security Checklist
+
+If you publish this repo and let others deploy their own instance:
+
+1. Use a dedicated Supabase project per deployment.
+2. Keep `POST /api/mcp` authenticated with OAuth (enabled by default).
+3. Never allow client-supplied `user_id` to override token scope.
+4. Keep all entity reads/writes scoped by `user_id` in storage queries.
+5. Keep Supabase Row Level Security enabled on all business tables.
+6. Do not use `DEFAULT_MCP_USER_ID` in production.
 
 ## MCP Behavior Goals
 

@@ -24,6 +24,13 @@ In Claude.ai Settings → Connectors:
 
 The endpoint is ready. All 10 tools will be available immediately.
 
+### Security Model (Important)
+
+- `GET /api/mcp` is public for connector discovery.
+- `POST /api/mcp` requires OAuth Bearer token.
+- Every tool call is bound to a tenant scope derived from the OAuth client.
+- Queries and writes are tenant-scoped only; no cross-tenant fallback is allowed.
+
 ### If "Connection issue" error appears:
 
 **Try Option A: Remove and Re-add**
@@ -101,8 +108,9 @@ Once connected, you can ask Claude:
 - Try hitting the endpoint directly: `curl https://ron.surajdev.com/api/mcp`
 
 ### "OAuth error"
-- Leave OAuth Client ID and Secret empty (not required for this server)
-- These fields are optional per the dialog
+- This server uses OAuth for `POST /api/mcp` requests.
+- Claude handles dynamic registration + authorization automatically.
+- If authorization fails, reconnect the connector and retry.
 
 ### "Tool not found"
 - Verify you're using the correct endpoint: `https://ron.surajdev.com/api/mcp`
@@ -113,9 +121,9 @@ Once connected, you can ask Claude:
 - `GET /health` - Health check
 - `GET /api/mcp/manifest` - Tool definitions
 - `GET /api/mcp` - MCP manifest (returns all tools)
-- `POST /api/mcp` - Execute MCP tool requests
+- `POST /api/mcp` - Execute MCP tool requests (OAuth Bearer required)
 
-All endpoints support CORS and are publicly accessible.
+Manifest endpoints are public. Tool execution is authenticated and tenant-scoped.
 
 ## Support
 

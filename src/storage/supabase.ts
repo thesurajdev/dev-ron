@@ -297,6 +297,7 @@ function calculateFlexibleMatchScore(
  * Update entity with new data (smart merge)
  */
 export async function updateEntity(
+  userId: string,
   entityId: string,
   newData: Record<string, any>,
   activityType?: string
@@ -305,6 +306,7 @@ export async function updateEntity(
     .from('entities')
     .select('data, history')
     .eq('id', entityId)
+    .eq('user_id', userId)
     .single();
 
   if (!entity) throw new Error('Entity not found');
@@ -337,7 +339,8 @@ export async function updateEntity(
       updated_at: new Date().toISOString(),
       last_activity: new Date().toISOString(),
     })
-    .eq('id', entityId);
+    .eq('id', entityId)
+    .eq('user_id', userId);
 
   if (error) throw error;
 }
@@ -345,11 +348,12 @@ export async function updateEntity(
 /**
  * Get complete entity profile
  */
-export async function getEntity(entityId: string) {
+export async function getEntity(userId: string, entityId: string) {
   const { data, error } = await supabase
     .from('entities')
     .select('*')
     .eq('id', entityId)
+    .eq('user_id', userId)
     .single();
 
   if (error) throw error;
@@ -472,6 +476,7 @@ export async function getRelatedEntities(
     .from('entities')
     .select('related_to')
     .eq('id', entityId)
+    .eq('user_id', userId)
     .single();
 
   if (!entity || !entity.related_to) return [];
@@ -483,6 +488,7 @@ export async function getRelatedEntities(
   const { data, error } = await supabase
     .from('entities')
     .select('*')
+    .eq('user_id', userId)
     .in('id', relatedIds);
 
   if (error) throw error;
@@ -611,11 +617,16 @@ export async function linkEntities(
   relationshipType: string
 ) {
   // Get first entity
-  const { data: entity1 } = await supabase
+  const { data: entity1, error: entity1Error } = await supabase
     .from('entities')
     .select('related_to')
     .eq('id', entityId1)
+    .eq('user_id', userId)
     .single();
+
+  if (entity1Error || !entity1) {
+    throw new Error('Primary entity not found in user scope');
+  }
 
   const relatedTo = entity1?.related_to || [];
 
@@ -630,14 +641,20 @@ export async function linkEntities(
   await supabase
     .from('entities')
     .update({ related_to: relatedTo })
-    .eq('id', entityId1);
+    .eq('id', entityId1)
+    .eq('user_id', userId);
 
   // Also link back
-  const { data: entity2 } = await supabase
+  const { data: entity2, error: entity2Error } = await supabase
     .from('entities')
     .select('related_to')
     .eq('id', entityId2)
+    .eq('user_id', userId)
     .single();
+
+  if (entity2Error || !entity2) {
+    throw new Error('Related entity not found in user scope');
+  }
 
   const relatedTo2 = entity2?.related_to || [];
 
@@ -651,13 +668,15 @@ export async function linkEntities(
   await supabase
     .from('entities')
     .update({ related_to: relatedTo2 })
-    .eq('id', entityId2);
+    .eq('id', entityId2)
+    .eq('user_id', userId);
 }
 
 /**
  * Merge duplicate entities
  */
 export async function mergeEntities(
+  userId: string,
   primaryId: string,
   duplicateId: string
 ) {
@@ -665,12 +684,14 @@ export async function mergeEntities(
     .from('entities')
     .select('data, history, related_to')
     .eq('id', primaryId)
+    .eq('user_id', userId)
     .single();
 
   const { data: duplicate } = await supabase
     .from('entities')
     .select('data, history, related_to')
     .eq('id', duplicateId)
+    .eq('user_id', userId)
     .single();
 
   if (!primary || !duplicate) {
@@ -702,11 +723,13 @@ export async function mergeEntities(
       history: mergedHistory,
       related_to: uniqueRelations,
     })
-    .eq('id', primaryId);
+    .eq('id', primaryId)
+    .eq('user_id', userId);
 
   // Delete duplicate
   await supabase
     .from('entities')
     .delete()
-    .eq('id', duplicateId);
+    .eq('id', duplicateId)
+    .eq('user_id', userId);
 }
