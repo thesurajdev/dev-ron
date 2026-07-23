@@ -424,8 +424,11 @@ function getDateRange(period: 'day' | 'week' | 'month' | 'year', referenceDate?:
  */
 export function getMcpManifest() {
   return {
-    name: 'Smart Data Logger MCP',
+    protocol: 'mcp',
     version: '2.0.0',
+    server_name: 'Smart Data Logger MCP',
+    server_url: 'https://ron.surajdev.com/api/mcp',
+    name: 'Smart Data Logger MCP',
     description:
       'Flexible, schema-less MCP for storing any data with intelligent deduplication and entity relationships',
     tools: [
