@@ -10,6 +10,87 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');
 
+function isPlainObject(value: any): value is Record<string, any> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizePrimitive(value: any): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim().toLowerCase();
+  return String(value).trim().toLowerCase();
+}
+
+function flattenObject(
+  input: any,
+  prefix = '',
+  out: Array<{ key: string; value: string }> = []
+): Array<{ key: string; value: string }> {
+  if (Array.isArray(input)) {
+    input.forEach((item, index) => flattenObject(item, `${prefix}[${index}]`, out));
+    return out;
+  }
+
+  if (isPlainObject(input)) {
+    Object.entries(input).forEach(([k, v]) => {
+      const next = prefix ? `${prefix}.${k}` : k;
+      flattenObject(v, next, out);
+    });
+    return out;
+  }
+
+  const normalized = normalizePrimitive(input);
+  if (normalized) {
+    out.push({ key: prefix || 'value', value: normalized });
+  }
+
+  return out;
+}
+
+function canonicalString(value: any): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalString).join(',')}]`;
+  }
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${k}:${canonicalString(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function uniqueArray(values: any[]): any[] {
+  const seen = new Set<string>();
+  const result: any[] = [];
+  values.forEach((v) => {
+    const key = canonicalString(v);
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(v);
+    }
+  });
+  return result;
+}
+
+function deepMergeData(existing: any, incoming: any): any {
+  if (Array.isArray(existing) && Array.isArray(incoming)) {
+    return uniqueArray([...existing, ...incoming]);
+  }
+
+  if (isPlainObject(existing) && isPlainObject(incoming)) {
+    const merged: Record<string, any> = { ...existing };
+    for (const [key, incomingValue] of Object.entries(incoming)) {
+      if (!(key in merged)) {
+        merged[key] = incomingValue;
+        continue;
+      }
+      merged[key] = deepMergeData(merged[key], incomingValue);
+    }
+    return merged;
+  }
+
+  // Prefer new scalar values while preserving history separately.
+  return incoming;
+}
+
 /**
  * Initialize Supabase tables
  * Schema is now flexible and entity-centric
@@ -62,24 +143,29 @@ export async function findOrCreateEntity(
   tags: string[] = []
 ): Promise<string> {
   // Search for existing entity with similar data
-  const { data: existingEntities } = await supabase
+  let existingQuery = supabase
     .from('entities')
-    .select('id, data, confidence')
+    .select('id, data, confidence, entity_type, tags')
     .eq('user_id', userId)
-    .eq('entity_type', entityType)
-    .limit(10);
+    .limit(100);
+
+  if (entityType && entityType !== 'unknown') {
+    existingQuery = existingQuery.eq('entity_type', entityType);
+  }
+
+  const { data: existingEntities } = await existingQuery;
 
   if (existingEntities && existingEntities.length > 0) {
     // Try to find matching entity based on key identifiers
     const matchScore = existingEntities.map((e: any) => ({
       id: e.id,
-      score: calculateMatchScore(e.data, data),
+      score: calculateMatchScore(e.data, data, e.entity_type, entityType, e.tags, tags),
     }));
 
     const bestMatch = matchScore.sort((a, b) => b.score - a.score)[0];
 
-    // If high confidence match (>60%), use existing entity
-    if (bestMatch.score > 60) {
+    // Strong confidence match means same entity; update instead of creating duplicate.
+    if (bestMatch.score >= 70) {
       return bestMatch.id;
     }
   }
@@ -105,26 +191,99 @@ export async function findOrCreateEntity(
  * Calculate match score between two data objects (0-100)
  * Higher score = more likely same entity
  */
-function calculateMatchScore(existing: Record<string, any>, incoming: Record<string, any>): number {
+function calculateMatchScore(
+  existing: Record<string, any>,
+  incoming: Record<string, any>,
+  existingType?: string,
+  incomingType?: string,
+  existingTags: string[] = [],
+  incomingTags: string[] = []
+): number {
+  return Math.min(
+    100,
+    calculateFlexibleMatchScore(
+      existing,
+      incoming,
+      existingType,
+      incomingType,
+      existingTags,
+      incomingTags
+    )
+  );
+}
+
+function calculateFlexibleMatchScore(
+  existing: Record<string, any>,
+  incoming: Record<string, any>,
+  existingType?: string,
+  incomingType?: string,
+  existingTags: string[] = [],
+  incomingTags: string[] = []
+): number {
   let score = 0;
 
-  // Check common identifiers
-  const identifiers = ['id', 'email', 'phone', 'name', 'username'];
+  // Type alignment signal
+  if (existingType && incomingType) {
+    if (existingType === incomingType) score += 10;
+    else if (incomingType !== 'unknown' && existingType !== 'unknown') score -= 10;
+  }
 
-  for (const key of identifiers) {
-    if (existing[key] && incoming[key]) {
-      if (existing[key].toLowerCase?.() === incoming[key].toLowerCase?.()) {
-        score += 50; // Strong match
-      } else if (
-        existing[key].toString().includes(incoming[key].toString()) ||
-        incoming[key].toString().includes(existing[key].toString())
-      ) {
-        score += 25; // Partial match
+  const existingPairs = flattenObject(existing);
+  const incomingPairs = flattenObject(incoming);
+
+  const existingByKey = new Map<string, string[]>();
+  existingPairs.forEach((p) => {
+    if (!existingByKey.has(p.key)) existingByKey.set(p.key, []);
+    existingByKey.get(p.key)!.push(p.value);
+  });
+
+  const incomingByKey = new Map<string, string[]>();
+  incomingPairs.forEach((p) => {
+    if (!incomingByKey.has(p.key)) incomingByKey.set(p.key, []);
+    incomingByKey.get(p.key)!.push(p.value);
+  });
+
+  // Strong identifier matches (works with arbitrary nesting due to key suffix matching)
+  const identifierHints = ['phone', 'mobile', 'whatsapp', 'email', 'id', 'name', 'username'];
+  for (const [key, existingVals] of existingByKey.entries()) {
+    if (!identifierHints.some((hint) => key.toLowerCase().includes(hint))) continue;
+    const incomingVals = incomingByKey.get(key) || [];
+    for (const ev of existingVals) {
+      for (const iv of incomingVals) {
+        if (!ev || !iv) continue;
+        if (ev === iv) score += 30;
+        else if (ev.includes(iv) || iv.includes(ev)) score += 12;
       }
     }
   }
 
-  return Math.min(score, 100);
+  // Generic key+value overlap across entire flexible object
+  const existingKeyValues = new Set(existingPairs.map((p) => `${p.key}:${p.value}`));
+  const incomingKeyValues = new Set(incomingPairs.map((p) => `${p.key}:${p.value}`));
+  let exactPairs = 0;
+  existingKeyValues.forEach((item) => {
+    if (incomingKeyValues.has(item)) exactPairs += 1;
+  });
+  score += Math.min(30, exactPairs * 6);
+
+  // Value overlap even with different keys
+  const existingValues = new Set(existingPairs.map((p) => p.value));
+  const incomingValues = new Set(incomingPairs.map((p) => p.value));
+  let overlappingValues = 0;
+  existingValues.forEach((v) => {
+    if (incomingValues.has(v)) overlappingValues += 1;
+  });
+  score += Math.min(20, overlappingValues * 3);
+
+  // Tag overlap signal
+  const existingTagSet = new Set((existingTags || []).map((t) => normalizePrimitive(t)));
+  let tagHits = 0;
+  (incomingTags || []).forEach((t) => {
+    if (existingTagSet.has(normalizePrimitive(t))) tagHits += 1;
+  });
+  score += Math.min(10, tagHits * 3);
+
+  return Math.max(0, score);
 }
 
 /**
@@ -143,9 +302,15 @@ export async function updateEntity(
 
   if (!entity) throw new Error('Entity not found');
 
-  // Merge data (new data overrides, but we track changes)
-  const mergedData = { ...entity.data, ...newData };
-  const changedFields = Object.keys(newData);
+  // Deep merge for flexible schemas: preserve nested context and dedupe arrays.
+  const mergedData = deepMergeData(entity.data || {}, newData || {});
+
+  const beforePairs = new Set(flattenObject(entity.data || {}).map((p) => `${p.key}:${p.value}`));
+  const afterPairs = new Set(flattenObject(mergedData || {}).map((p) => `${p.key}:${p.value}`));
+  const changedFields = Array.from(afterPairs)
+    .filter((pair) => !beforePairs.has(pair))
+    .map((pair) => pair.split(':')[0])
+    .filter((v, i, arr) => arr.indexOf(v) === i);
 
   // Add to history
   const history = entity.history || [];
