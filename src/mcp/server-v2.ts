@@ -39,6 +39,15 @@ export function response(success: boolean, data?: any, error?: string) {
   return { success: false, error: error || 'Unknown error' };
 }
 
+const DEFAULT_MCP_USER_ID = process.env.DEFAULT_MCP_USER_ID || 'default_user';
+
+function withUserId<T extends { user_id?: string }>(input: T): T & { user_id: string } {
+  return {
+    ...input,
+    user_id: input?.user_id || DEFAULT_MCP_USER_ID,
+  };
+}
+
 /**
  * MCP Handlers - Smart entity management
  */
@@ -49,6 +58,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   add_data: async (input: AddDataInput) => {
     try {
+      const normalized = withUserId(input);
       const {
         user_id,
         entity_type = 'unknown',
@@ -58,7 +68,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
         related_to,
         tags = [],
         entity_id,
-      } = input;
+      } = normalized;
 
       // Find or create entity
       let finalEntityId = entity_id;
@@ -108,7 +118,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_entity: async (input: GetEntityInput) => {
     try {
-      const { user_id, entity_id, search_query, entity_type, include_history } = input;
+      const normalized = withUserId(input);
+      const { user_id, entity_id, search_query, entity_type, include_history } = normalized;
 
       let results: any[] = [];
 
@@ -149,7 +160,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_related: async (input: GetRelatedInput) => {
     try {
-      const { user_id, entity_id, relationship_type } = input;
+      const normalized = withUserId(input);
+      const { user_id, entity_id, relationship_type } = normalized;
 
       const related = await getRelatedEntities(user_id, entity_id);
 
@@ -182,7 +194,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_timeline: async (input: GetTimelineInput) => {
     try {
-      const { user_id, entity_id, period = 'day', date } = input;
+      const normalized = withUserId(input);
+      const { user_id, entity_id, period = 'day', date } = normalized;
 
       let dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
       const activities = await getActivities(
@@ -213,7 +226,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_summary: async (input: GetSummaryInput) => {
     try {
-      const { user_id, period = 'day', date, entity_id, entity_type } = input;
+      const normalized = withUserId(input);
+      const { user_id, period = 'day', date, entity_id, entity_type } = normalized;
 
       let dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
 
@@ -275,7 +289,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   search: async (input: SearchInput) => {
     try {
-      const { user_id, query, entity_type, limit = 50 } = input;
+      const normalized = withUserId(input);
+      const { user_id, query, entity_type, limit = 50 } = normalized;
 
       const results = await searchEntities(user_id, query, entity_type);
 
@@ -300,7 +315,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   link_entities: async (input: LinkEntitiesInput) => {
     try {
-      const { user_id, entity_id_1, entity_id_2, relationship_type, notes } = input;
+      const normalized = withUserId(input);
+      const { user_id, entity_id_1, entity_id_2, relationship_type, notes } = normalized;
 
       await linkEntities(user_id, entity_id_1, entity_id_2, relationship_type);
 
@@ -319,7 +335,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   merge_entities: async (input: MergeEntitiesInput) => {
     try {
-      const { user_id, primary_entity_id, duplicate_entity_id } = input;
+      const normalized = withUserId(input);
+      const { user_id, primary_entity_id, duplicate_entity_id } = normalized;
 
       await mergeEntities(primary_entity_id, duplicate_entity_id);
 
@@ -338,7 +355,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   record_metric: async (input: RecordMetricInput) => {
     try {
-      const { user_id, metric_name, value, entity_id, date, tags = [] } = input;
+      const normalized = withUserId(input);
+      const { user_id, metric_name, value, entity_id, date, tags = [] } = normalized;
 
       await recordMetric(user_id, metric_name, value, entity_id, tags);
 
@@ -357,7 +375,8 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
    */
   get_metrics: async (input: GetMetricsInput) => {
     try {
-      const { user_id, metric_names, entity_id, period = 'day', date } = input;
+      const normalized = withUserId(input);
+      const { user_id, metric_names, entity_id, period = 'day', date } = normalized;
 
       let dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
       const metrics = await getMetrics(
@@ -455,7 +474,7 @@ export function getMcpManifest() {
             tags: { type: 'array', items: { type: 'string' } },
             entity_id: { type: 'string', description: 'Specific entity to update' },
           },
-          required: ['user_id', 'data'],
+          required: ['data'],
         },
       },
       {
@@ -479,7 +498,7 @@ export function getMcpManifest() {
             entity_type: { type: 'string' },
             include_history: { type: 'boolean' },
           },
-          required: ['user_id'],
+          required: [],
         },
       },
       {
@@ -500,7 +519,7 @@ export function getMcpManifest() {
             entity_id: { type: 'string' },
             relationship_type: { type: 'string' },
           },
-          required: ['user_id', 'entity_id'],
+          required: ['entity_id'],
         },
       },
       {
@@ -522,7 +541,7 @@ export function getMcpManifest() {
             period: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
             date: { type: 'string' },
           },
-          required: ['user_id', 'period'],
+          required: ['period'],
         },
       },
       {
@@ -546,7 +565,7 @@ export function getMcpManifest() {
             entity_id: { type: 'string' },
             entity_type: { type: 'string' },
           },
-          required: ['user_id', 'period'],
+          required: ['period'],
         },
       },
       {
@@ -568,7 +587,7 @@ export function getMcpManifest() {
             entity_type: { type: 'string' },
             limit: { type: 'number' },
           },
-          required: ['user_id', 'query'],
+          required: ['query'],
         },
       },
       {
@@ -591,7 +610,7 @@ export function getMcpManifest() {
             relationship_type: { type: 'string' },
             notes: { type: 'string' },
           },
-          required: ['user_id', 'entity_id_1', 'entity_id_2', 'relationship_type'],
+          required: ['entity_id_1', 'entity_id_2', 'relationship_type'],
         },
       },
       {
@@ -612,7 +631,7 @@ export function getMcpManifest() {
             primary_entity_id: { type: 'string' },
             duplicate_entity_id: { type: 'string' },
           },
-          required: ['user_id', 'primary_entity_id', 'duplicate_entity_id'],
+          required: ['primary_entity_id', 'duplicate_entity_id'],
         },
       },
       {
@@ -636,7 +655,7 @@ export function getMcpManifest() {
             date: { type: 'string' },
             tags: { type: 'array', items: { type: 'string' } },
           },
-          required: ['user_id', 'metric_name', 'value'],
+          required: ['metric_name', 'value'],
         },
       },
       {
@@ -659,7 +678,7 @@ export function getMcpManifest() {
             period: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
             date: { type: 'string' },
           },
-          required: ['user_id', 'period'],
+          required: ['period'],
         },
       },
     ],
