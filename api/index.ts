@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-// CJS entry point for Vercel serverless - all heavy imports are lazy (per-request)
+// CJS entry point for Vercel serverless
+// Note: src/ files are ESM (root package.json "type":"module"), must use dynamic import()
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
@@ -9,23 +11,23 @@ app.use(express.json());
 
 // Health - no imports needed
 app.get('/health', (_req: any, res: any) => {
-  res.json({ status: 'ok', version: 'v3', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'v4', timestamp: new Date().toISOString() });
 });
 
-// Manifest - lazy import
+// Manifest - dynamic import() for ESM src/ module
 app.get(['/api/mcp/manifest', '/manifest'], async (_req: any, res: any) => {
   try {
-    const { getMcpManifest } = require('../src/mcp/server-v2');
+    const { getMcpManifest } = await import('../src/mcp/server-v2.js');
     res.json(getMcpManifest());
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// MCP endpoint - lazy import
+// MCP endpoint - dynamic import() for ESM src/ module
 app.post(['/api/mcp', '/mcp'], async (req: any, res: any) => {
   try {
-    const { handleMCPRequest } = require('../src/mcp/handler');
+    const { handleMCPRequest } = await import('../src/mcp/handler.js');
     const response = await handleMCPRequest(req.body);
     res.json(response);
   } catch (err: any) {
