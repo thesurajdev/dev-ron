@@ -58,6 +58,33 @@ function matchesAllTokens(text: string, tokens: string[]): boolean {
   return tokens.every((t) => text.includes(t));
 }
 
+function tokenizeQuery(query: string): string[] {
+  const stopwords = new Set([
+    'how',
+    'many',
+    'what',
+    'is',
+    'are',
+    'the',
+    'a',
+    'an',
+    'we',
+    'have',
+    'for',
+    'of',
+    'in',
+    'to',
+    'on',
+    'with',
+  ]);
+
+  return normalizeText(query)
+    .replace(/[^a-z0-9\s_-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((t) => !stopwords.has(t));
+}
+
 /**
  * MCP Handlers - Smart entity management
  */
@@ -302,8 +329,7 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       const normalized = withUserId(input);
       const { user_id, query, entity_type, limit = 50 } = normalized;
 
-      const rawQuery = normalizeText(query).trim();
-      const tokens = rawQuery.split(/\s+/).filter(Boolean);
+      const tokens = tokenizeQuery(query);
 
       // First pass: indexed field search (fast)
       const indexedResults = await searchEntities(user_id, query, entity_type);
