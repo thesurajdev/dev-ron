@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { initializeDatabase } from "./storage/supabase.js";
 import { getMcpManifest, MCP_HANDLERS } from "./mcp/server-v2.js";
-import { handleMCPRequest, getManifest } from "./mcp/handler.js";
 
 // Export everything for external use
 export * from "./types/index.js";
