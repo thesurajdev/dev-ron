@@ -1173,6 +1173,25 @@ export function getMcpManifest() {
     'get_summary',
   ]);
 
+  const standardOutputSchema = {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean' },
+      data: {
+        oneOf: [
+          { type: 'object' },
+          { type: 'array' },
+          { type: 'string' },
+          { type: 'number' },
+          { type: 'boolean' },
+          { type: 'null' },
+        ],
+      },
+      error: { type: 'string' },
+    },
+    required: ['success'],
+  };
+
   const allTools = [
     
       {
@@ -1602,7 +1621,13 @@ export function getMcpManifest() {
       },
     ];
 
-  const tools = allTools.filter((tool: any) => coreToolNames.has(tool.name));
+  const tools = allTools
+    .filter((tool: any) => coreToolNames.has(tool.name))
+    .map((tool: any) => ({
+      ...tool,
+      outputSchema: standardOutputSchema,
+      output_schema: standardOutputSchema,
+    }));
 
   return {
     protocol: 'mcp',
