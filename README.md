@@ -39,6 +39,28 @@ The AI provides reasoning.
 
 This separation keeps the system reliable, extensible, and ready to evolve into a complete AI-powered operating system.
 
+## Canonical Data Model
+
+The target storage architecture is a unified object graph built to answer:
+
+What happened, to whom, when, why, and how is it connected?
+
+Core tables:
+
+1. objects
+2. relations
+3. events
+4. activities
+5. attachments
+6. history
+7. jobs
+
+Optional:
+
+8. collections (dynamic folders/groups)
+
+Everything else (CRM views, bookkeeping views, task views, reports) is derived from these connected facts.
+
 ## The Brain: Memory Engine
 
 The Memory Engine never blindly stores data. For every new input, it:

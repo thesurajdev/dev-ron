@@ -10,6 +10,42 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');
 
+function toUuidList(involvedEntities: Array<{ entity_id: string; role: string }> = []): string[] {
+  return involvedEntities
+    .map((e) => String(e?.entity_id || '').trim())
+    .filter(Boolean);
+}
+
+function toInvolvedEntityObjects(value: any): Array<{ entity_id: string; role: string }> {
+  if (!Array.isArray(value)) return [];
+
+  // Legacy/new shape: [{ entity_id, role }]
+  if (value.length === 0 || typeof value[0] === 'object') {
+    return value
+      .map((e: any) => ({
+        entity_id: String(e?.entity_id || '').trim(),
+        role: String(e?.role || 'related').trim() || 'related',
+      }))
+      .filter((e) => Boolean(e.entity_id));
+  }
+
+  // UUID[] shape from older deployments.
+  return value
+    .map((id: any) => String(id || '').trim())
+    .filter(Boolean)
+    .map((entity_id) => ({ entity_id, role: 'related' }));
+}
+
+function normalizeActivityRow(row: any) {
+  const involvedFromV2 = toInvolvedEntityObjects(row?.involved_entities_v2);
+  const involvedFromPrimary = toInvolvedEntityObjects(row?.involved_entities);
+
+  return {
+    ...row,
+    involved_entities: involvedFromV2.length > 0 ? involvedFromV2 : involvedFromPrimary,
+  };
+}
+
 function sanitizeSearchQuery(query: string): string {
   return String(query || '')
     .replace(/[%(),?]/g, ' ')
@@ -24,6 +60,23 @@ function tokenizeSearchQuery(query: string): string[] {
     .filter((t) => t.length >= 2);
 }
 
+function normalizeDigits(value: any): string {
+  return String(value ?? '').replace(/\D+/g, '');
+}
+
+function tokenMatchesHaystack(haystack: string, token: string, haystackDigits: string): boolean {
+  if (!token) return false;
+  if (haystack.includes(token)) return true;
+
+  // Support phone-like queries where formatting differs (e.g. +91 88008 15510 vs 8800815510).
+  const tokenDigits = normalizeDigits(token);
+  if (tokenDigits.length >= 7 && haystackDigits.includes(tokenDigits)) {
+    return true;
+  }
+
+  return false;
+}
+
 function objectMatchesTokens(candidate: any, tokens: string[]): boolean {
   if (tokens.length === 0) return true;
 
@@ -36,7 +89,9 @@ function objectMatchesTokens(candidate: any, tokens: string[]): boolean {
     .map((v) => normalizePrimitive(v))
     .join(' ');
 
-  const matched = tokens.filter((t) => haystack.includes(t)).length;
+  const haystackDigits = normalizeDigits(haystack);
+
+  const matched = tokens.filter((t) => tokenMatchesHaystack(haystack, t, haystackDigits)).length;
   if (tokens.length <= 2) return matched >= 1;
   return matched >= Math.ceil(tokens.length * 0.6);
 }
@@ -370,6 +425,45 @@ export async function updateEntity(
 }
 
 /**
+ * Ensure specific tags exist on an entity without removing existing tags.
+ */
+export async function ensureEntityTags(
+  userId: string,
+  entityId: string,
+  requiredTags: string[] = []
+) {
+  const normalizedRequired = (requiredTags || [])
+    .map((t) => String(t || '').trim())
+    .filter(Boolean);
+
+  if (normalizedRequired.length === 0) return;
+
+  const { data: entity, error: readError } = await supabase
+    .from('entities')
+    .select('tags')
+    .eq('id', entityId)
+    .eq('user_id', userId)
+    .single();
+
+  if (readError || !entity) {
+    throw new Error('Entity not found in user scope');
+  }
+
+  const currentTags = Array.isArray(entity.tags) ? entity.tags : [];
+  const mergedTags = Array.from(new Set([...currentTags, ...normalizedRequired]));
+
+  if (mergedTags.length === currentTags.length) return;
+
+  const { error: updateError } = await supabase
+    .from('entities')
+    .update({ tags: mergedTags, updated_at: new Date().toISOString() })
+    .eq('id', entityId)
+    .eq('user_id', userId);
+
+  if (updateError) throw updateError;
+}
+
+/**
  * Get complete entity profile
  */
 export async function getEntity(userId: string, entityId: string) {
@@ -499,19 +593,27 @@ export async function addActivity(
   involvedEntities: Array<{ entity_id: string; role: string }> = [],
   tags: string[] = []
 ) {
-  const { error } = await supabase
-    .from('activities')
-    .insert({
-      user_id: userId,
-      activity_type: activityType,
-      date: new Date().toISOString().split('T')[0],
-      created_at: new Date().toISOString(),
-      data,
-      involved_entities: involvedEntities,
-      tags,
-    });
+  const basePayload = {
+    user_id: userId,
+    activity_type: activityType,
+    date: new Date().toISOString().split('T')[0],
+    created_at: new Date().toISOString(),
+    data,
+    involved_entities: toUuidList(involvedEntities),
+    tags,
+  };
 
-  if (error) throw error;
+  // Prefer dual-write shape when companion JSONB column exists.
+  const withV2Payload = {
+    ...basePayload,
+    involved_entities_v2: involvedEntities,
+  };
+
+  const withV2Attempt = await supabase.from('activities').insert(withV2Payload);
+  if (!withV2Attempt.error) return;
+
+  const fallbackAttempt = await supabase.from('activities').insert(basePayload);
+  if (fallbackAttempt.error) throw fallbackAttempt.error;
 }
 
 /**
@@ -535,7 +637,7 @@ export async function getActivities(
 
   if (error) throw error;
 
-  let activities = data || [];
+  let activities = (data || []).map((row: any) => normalizeActivityRow(row));
 
   if (entityId) {
     activities = activities.filter((a: any) =>
@@ -556,12 +658,17 @@ export async function recordMetric(
   entityId?: string,
   tags: string[] = []
 ) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    throw new Error('Metric value must be numeric for current database schema');
+  }
+
   const { error } = await supabase
     .from('metrics')
     .insert({
       user_id: userId,
       metric_name: metricName,
-      value,
+      value: numericValue,
       entity_id: entityId,
       date: new Date().toISOString().split('T')[0],
       tags,

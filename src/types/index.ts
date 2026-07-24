@@ -229,3 +229,68 @@ export interface GetMetricsInput {
   period?: 'day' | 'week' | 'month' | 'year'; // Defaults to 'day'
   date?: string;
 }
+
+/**
+ * Set or update owner profile data used by MCP reasoning context.
+ */
+export interface SetProfileInput {
+  user_id: string;
+  profile_type?: 'person' | 'business'; // Defaults to 'person'
+  data: Record<string, any>;
+  tags?: string[];
+}
+
+/**
+ * Retrieve owner profile data.
+ */
+export interface GetProfileInput {
+  user_id: string;
+  profile_type?: 'person' | 'business'; // Defaults to 'person'
+  include_history?: boolean;
+}
+
+/**
+ * Record a bookkeeping transaction entry.
+ */
+export interface RecordTransactionInput {
+  user_id: string;
+  // Flexible transaction payload so teams can evolve schema without code changes.
+  transaction: Record<string, any>;
+  amount?: number;
+  transaction_type?: string;
+  currency?: string;
+  category?: string;
+  description?: string;
+  date?: string; // YYYY-MM-DD
+  payment_mode?: string; // cash, bank, upi, card, etc.
+  entity_id?: string; // counterparty or related entity
+  tags?: string[];
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Get cash flow summary from transaction entries.
+ */
+export interface GetCashFlowInput {
+  user_id: string;
+  period?: 'day' | 'week' | 'month' | 'year';
+  date?: string;
+  entity_id?: string;
+  currency?: string;
+  inflow_types?: string[];
+  outflow_types?: string[];
+}
+
+/**
+ * Get profit/receivables/payables summary from transaction entries.
+ */
+export interface GetFinanceSummaryInput {
+  user_id: string;
+  period?: 'day' | 'week' | 'month' | 'year';
+  date?: string;
+  entity_id?: string;
+  currency?: string;
+  revenue_types?: string[];
+  expense_types?: string[];
+  pending_statuses?: string[];
+}

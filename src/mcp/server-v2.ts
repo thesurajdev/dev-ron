@@ -6,6 +6,7 @@
 import {
   findOrCreateEntity,
   updateEntity,
+  ensureEntityTags,
   getEntity,
   searchEntities,
   listEntitiesByUser,
@@ -28,6 +29,11 @@ import type {
   GetTimelineInput,
   RecordMetricInput,
   GetMetricsInput,
+  SetProfileInput,
+  GetProfileInput,
+  RecordTransactionInput,
+  GetCashFlowInput,
+  GetFinanceSummaryInput,
 } from '../types/index.js';
 
 /**
@@ -66,10 +72,28 @@ function normalizeText(value: any): string {
   return String(value).toLowerCase();
 }
 
+function normalizeDigits(value: any): string {
+  return String(value ?? '').replace(/\D+/g, '');
+}
+
+function tokenMatchesText(text: string, token: string, textDigits: string): boolean {
+  if (!token) return false;
+  if (text.includes(token)) return true;
+
+  // Handle phone-like lookups where stored values may contain spaces/country codes.
+  const tokenDigits = normalizeDigits(token);
+  if (tokenDigits.length >= 7 && textDigits.includes(tokenDigits)) {
+    return true;
+  }
+
+  return false;
+}
+
 function matchesAllTokens(text: string, tokens: string[]): boolean {
   if (tokens.length === 0) return true;
 
-  const matchedCount = tokens.filter((t) => text.includes(t)).length;
+  const textDigits = normalizeDigits(text);
+  const matchedCount = tokens.filter((t) => tokenMatchesText(text, t, textDigits)).length;
 
   // For short name-like queries, allow partial token matches (e.g. "suraj dev" when only "suraj" exists).
   if (tokens.length <= 2) {
@@ -125,10 +149,143 @@ function normalizeRelationshipToken(token: string): string {
   return token;
 }
 
+function isEntityTagged(entity: any, expectedTag: string): boolean {
+  const tags = Array.isArray(entity?.tags) ? entity.tags : [];
+  return tags.some((tag: any) => normalizeText(tag) === normalizeText(expectedTag));
+}
+
+function getProfileDefaults(profileType: 'person' | 'business') {
+  if (profileType === 'business') {
+    return {
+      entityType: 'organization',
+      profileTag: 'profile:business',
+      roleTag: 'role:owner_business',
+    };
+  }
+
+  return {
+    entityType: 'person',
+    profileTag: 'profile:self',
+    roleTag: 'role:owner',
+  };
+}
+
+function toNumberOrZero(value: any): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeCurrency(value?: string): string {
+  const currency = String(value || '').trim().toUpperCase();
+  return currency || 'INR';
+}
+
+function normalizeTransactionType(value: any): string {
+  return String(value || 'unknown').trim().toLowerCase();
+}
+
+function isInflowType(type: string, inflowTypes: Set<string>): boolean {
+  return inflowTypes.has(type);
+}
+
+function isOutflowType(type: string, outflowTypes: Set<string>): boolean {
+  return outflowTypes.has(type);
+}
+
+function normalizeStatus(value: any): string {
+  return String(value || '').trim().toLowerCase();
+}
+
 /**
  * MCP Handlers - Smart entity management
  */
 export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
+  /**
+   * Set or update the authenticated user's profile so AI can identify the owner context.
+   */
+  set_profile: async (input: SetProfileInput) => {
+    try {
+      const normalized = withUserId(input);
+      const { user_id, data, tags = [] } = normalized;
+      const profile_type = normalized.profile_type || 'person';
+
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return response(false, null, 'Profile data must be a JSON object');
+      }
+
+      const { entityType, profileTag, roleTag } = getProfileDefaults(profile_type);
+      const profileTags = Array.from(new Set([profileTag, roleTag, ...(tags || [])]));
+
+      const existingEntities = await listEntitiesByUser(user_id, entityType, 300);
+      const existingProfile = existingEntities.find((e: any) => isEntityTagged(e, profileTag));
+
+      let profileEntityId = existingProfile?.id;
+
+      if (profileEntityId) {
+        await updateEntity(user_id, profileEntityId, data, 'profile_update');
+      } else {
+        profileEntityId = await findOrCreateEntity(user_id, entityType, data, profileTags);
+        await updateEntity(user_id, profileEntityId, data, 'profile_update');
+      }
+
+      await ensureEntityTags(user_id, profileEntityId, profileTags);
+
+      const profileEntity = await getEntity(user_id, profileEntityId);
+
+      return response(true, {
+        message: 'Profile saved successfully',
+        profile_type,
+        entity_id: profileEntityId,
+        entity_type: entityType,
+        tags: profileEntity.tags,
+        data: profileEntity.data,
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
+
+  /**
+   * Retrieve the authenticated user's profile.
+   */
+  get_profile: async (input: GetProfileInput) => {
+    try {
+      const normalized = withUserId(input);
+      const { user_id, include_history } = normalized;
+      const profile_type = normalized.profile_type || 'person';
+
+      const { entityType, profileTag } = getProfileDefaults(profile_type);
+      const candidates = await listEntitiesByUser(user_id, entityType, 300);
+      const profile = candidates.find((e: any) => isEntityTagged(e, profileTag));
+
+      if (!profile) {
+        return response(true, {
+          found: false,
+          profile_type,
+          message: `No ${profile_type} profile is set yet. Call set_profile first.`,
+        });
+      }
+
+      const fullProfile = await getEntity(user_id, profile.id);
+
+      return response(true, {
+        found: true,
+        profile_type,
+        entity: {
+          id: fullProfile.id,
+          type: fullProfile.entity_type,
+          created: fullProfile.created_at,
+          last_updated: fullProfile.updated_at,
+          tags: fullProfile.tags,
+          data: fullProfile.data,
+          history: include_history ? fullProfile.history : undefined,
+        },
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
+
   /**
    * Add or update data (smart consolidation)
    * Will find or create entity, merge data intelligently
@@ -604,6 +761,289 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       return response(false, null, err.message);
     }
   },
+
+  /**
+   * Record bookkeeping transaction for expense/sale/purchase/income/cashflow analysis.
+   */
+  record_transaction: async (input: RecordTransactionInput) => {
+    try {
+      const normalized = withUserId(input);
+      const {
+        user_id,
+        transaction,
+        transaction_type,
+        amount,
+        currency,
+        category,
+        description,
+        date,
+        payment_mode,
+        entity_id,
+        tags = [],
+        metadata,
+      } = normalized;
+
+      const transactionObject =
+        transaction && typeof transaction === 'object' && !Array.isArray(transaction)
+          ? transaction
+          : {};
+
+      const resolvedType = normalizeTransactionType(
+        transaction_type ?? transactionObject.transaction_type ?? transactionObject.type
+      );
+
+      const resolvedAmount =
+        amount ?? transactionObject.amount ?? transactionObject.value ?? transactionObject.total;
+      const normalizedAmount = toNumberOrZero(resolvedAmount);
+      if (normalizedAmount <= 0) {
+        return response(false, null, 'amount must be a positive number');
+      }
+
+      const txDate =
+        date || transactionObject.date || transactionObject.tx_date || (new Date().toISOString().split('T')[0] as string);
+      const txCurrency = normalizeCurrency(currency || transactionObject.currency);
+      const txCategory = category || transactionObject.category || null;
+      const txDescription = description || transactionObject.description || transactionObject.note || null;
+      const txPaymentMode = payment_mode || transactionObject.payment_mode || transactionObject.paymentMethod || null;
+
+      const inflowTypes = new Set(['sale', 'income', 'refund', 'receipt', 'credit']);
+      const outflowTypes = new Set(['purchase', 'expense', 'payment', 'debit']);
+
+      const direction = isInflowType(resolvedType, inflowTypes)
+        ? 'inflow'
+        : isOutflowType(resolvedType, outflowTypes)
+          ? 'outflow'
+          : resolvedType === 'transfer'
+            ? 'neutral'
+            : 'neutral';
+
+      const signedAmount =
+        direction === 'inflow' ? normalizedAmount : direction === 'outflow' ? -normalizedAmount : 0;
+
+      await addActivity(
+        user_id,
+        'transaction',
+        {
+          transaction_type: resolvedType,
+          amount: normalizedAmount,
+          signed_amount: signedAmount,
+          direction,
+          currency: txCurrency,
+          category: txCategory,
+          description: txDescription,
+          payment_mode: txPaymentMode,
+          metadata: metadata || {},
+          date: txDate,
+          transaction: transactionObject,
+        },
+        entity_id ? [{ entity_id, role: 'counterparty' }] : [],
+        ['bookkeeping', `tx:${resolvedType}`, ...(tags || [])]
+      );
+
+      return response(true, {
+        message: 'Transaction recorded successfully',
+        transaction: {
+          transaction_type: resolvedType,
+          amount: normalizedAmount,
+          signed_amount: signedAmount,
+          direction,
+          currency: txCurrency,
+          category: txCategory,
+          description: txDescription,
+          payment_mode: txPaymentMode,
+          date: txDate,
+          entity_id: entity_id || null,
+          transaction: transactionObject,
+        },
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
+
+  /**
+   * Get cash flow summary for a period.
+   */
+  get_cash_flow: async (input: GetCashFlowInput) => {
+    try {
+      const normalized = withUserId(input);
+      const {
+        user_id,
+        period = 'month',
+        date,
+        entity_id,
+        currency,
+        inflow_types,
+        outflow_types,
+      } = normalized;
+
+      const dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
+      const selectedCurrency = currency ? normalizeCurrency(currency) : undefined;
+      const activities = await getActivities(user_id, dateRange.start, dateRange.end, entity_id);
+      const transactions = activities.filter((a: any) => a.activity_type === 'transaction');
+
+      const inflowTypeSet = new Set(
+        (inflow_types && inflow_types.length > 0
+          ? inflow_types
+          : ['sale', 'income', 'refund', 'receipt', 'credit'])
+          .map((t: string) => normalizeTransactionType(t))
+      );
+      const outflowTypeSet = new Set(
+        (outflow_types && outflow_types.length > 0
+          ? outflow_types
+          : ['purchase', 'expense', 'payment', 'debit'])
+          .map((t: string) => normalizeTransactionType(t))
+      );
+
+      const filteredTransactions = selectedCurrency
+        ? transactions.filter((t: any) => normalizeCurrency(t?.data?.currency) === selectedCurrency)
+        : transactions;
+
+      let inflow = 0;
+      let outflow = 0;
+      const byType: Record<string, number> = {};
+      const byCategory: Record<string, number> = {};
+
+      filteredTransactions.forEach((t: any) => {
+        const txType = normalizeTransactionType(t?.data?.transaction_type || t?.data?.transaction?.type);
+        const category = String(t?.data?.category || 'uncategorized');
+        const amount = toNumberOrZero(t?.data?.amount);
+        const direction = String(t?.data?.direction || '').toLowerCase();
+
+        let signedAmount = toNumberOrZero(t?.data?.signed_amount);
+        if (!signedAmount) {
+          if (direction === 'inflow' || isInflowType(txType, inflowTypeSet)) {
+            signedAmount = amount;
+          } else if (direction === 'outflow' || isOutflowType(txType, outflowTypeSet)) {
+            signedAmount = -amount;
+          } else {
+            signedAmount = 0;
+          }
+        }
+
+        if (signedAmount > 0) inflow += signedAmount;
+        if (signedAmount < 0) outflow += Math.abs(signedAmount);
+
+        byType[txType] = (byType[txType] || 0) + amount;
+        byCategory[category] = (byCategory[category] || 0) + amount;
+      });
+
+      return response(true, {
+        period,
+        date_range: dateRange,
+        entity_id: entity_id || null,
+        currency: selectedCurrency || null,
+        inflow_types: Array.from(inflowTypeSet),
+        outflow_types: Array.from(outflowTypeSet),
+        transaction_count: filteredTransactions.length,
+        inflow,
+        outflow,
+        net_cash_flow: inflow - outflow,
+        by_type: byType,
+        by_category: byCategory,
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
+
+  /**
+   * Get finance summary with profit and pending balances.
+   */
+  get_finance_summary: async (input: GetFinanceSummaryInput) => {
+    try {
+      const normalized = withUserId(input);
+      const {
+        user_id,
+        period = 'month',
+        date,
+        entity_id,
+        currency,
+        revenue_types,
+        expense_types,
+        pending_statuses,
+      } = normalized;
+
+      const dateRange = getDateRange(period as 'day' | 'week' | 'month' | 'year', date);
+      const selectedCurrency = currency ? normalizeCurrency(currency) : undefined;
+      const activities = await getActivities(user_id, dateRange.start, dateRange.end, entity_id);
+      const transactions = activities.filter((a: any) => a.activity_type === 'transaction');
+
+      const revenueTypeSet = new Set(
+        (revenue_types && revenue_types.length > 0
+          ? revenue_types
+          : ['sale', 'income', 'refund', 'receipt', 'credit'])
+          .map((t: string) => normalizeTransactionType(t))
+      );
+      const expenseTypeSet = new Set(
+        (expense_types && expense_types.length > 0
+          ? expense_types
+          : ['purchase', 'expense', 'payment', 'debit'])
+          .map((t: string) => normalizeTransactionType(t))
+      );
+      const pendingStatusSet = new Set(
+        (pending_statuses && pending_statuses.length > 0
+          ? pending_statuses
+          : ['pending', 'unpaid', 'partial', 'partially_paid', 'due', 'open'])
+          .map((s: string) => normalizeStatus(s))
+      );
+
+      const filtered = selectedCurrency
+        ? transactions.filter((t: any) => normalizeCurrency(t?.data?.currency) === selectedCurrency)
+        : transactions;
+
+      let totalRevenue = 0;
+      let totalExpense = 0;
+      let pendingReceivables = 0;
+      let pendingPayables = 0;
+
+      filtered.forEach((t: any) => {
+        const tx = t?.data?.transaction || {};
+        const txType = normalizeTransactionType(t?.data?.transaction_type || tx?.transaction_type || tx?.type);
+        const amount = toNumberOrZero(t?.data?.amount || tx?.amount || tx?.value || tx?.total);
+        const paidAmount = toNumberOrZero(tx?.paid_amount ?? t?.data?.paid_amount ?? 0);
+        const status = normalizeStatus(tx?.status ?? t?.data?.status ?? '');
+        const direction = normalizeStatus(t?.data?.direction);
+
+        const isRevenue = direction === 'inflow' || isInflowType(txType, revenueTypeSet);
+        const isExpense = direction === 'outflow' || isOutflowType(txType, expenseTypeSet);
+
+        if (isRevenue) totalRevenue += amount;
+        if (isExpense) totalExpense += amount;
+
+        const isPendingByStatus = status ? pendingStatusSet.has(status) : false;
+        const balanceDue = Math.max(0, amount - paidAmount);
+
+        if (balanceDue > 0 || isPendingByStatus) {
+          const unresolved = balanceDue > 0 ? balanceDue : amount;
+          if (isRevenue) pendingReceivables += unresolved;
+          if (isExpense) pendingPayables += unresolved;
+        }
+      });
+
+      return response(true, {
+        period,
+        date_range: dateRange,
+        entity_id: entity_id || null,
+        currency: selectedCurrency || null,
+        revenue_types: Array.from(revenueTypeSet),
+        expense_types: Array.from(expenseTypeSet),
+        pending_statuses: Array.from(pendingStatusSet),
+        transaction_count: filtered.length,
+        totals: {
+          revenue: totalRevenue,
+          expense: totalExpense,
+          gross_profit: totalRevenue - totalExpense,
+          pending_receivables: pendingReceivables,
+          pending_payables: pendingPayables,
+          net_position_after_pending:
+            (totalRevenue - totalExpense) + (pendingReceivables - pendingPayables),
+        },
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
 };
 
 /**
@@ -654,6 +1094,50 @@ export function getMcpManifest() {
     description:
       'AI-native business operating system memory interface that transforms raw input into connected business knowledge',
     tools: [
+      {
+        name: 'set_profile',
+        description:
+          'Set or update your owner profile (person or business) so MCP and AI can identify who you are in this tenant scope.',
+        readOnlyHint: false,
+        openWorldHint: false,
+        destructiveHint: true,
+        annotations: {
+          readOnlyHint: false,
+          openWorldHint: false,
+          destructiveHint: true,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            profile_type: { type: 'string', enum: ['person', 'business'] },
+            data: { type: 'object', description: 'Profile fields like name, phone, company, website, role' },
+            tags: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['data'],
+        },
+      },
+      {
+        name: 'get_profile',
+        description: 'Get your saved owner profile (person or business) for the current tenant scope.',
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            profile_type: { type: 'string', enum: ['person', 'business'] },
+            include_history: { type: 'boolean' },
+          },
+          required: [],
+        },
+      },
       {
         name: 'add_data',
         description:
@@ -882,6 +1366,93 @@ export function getMcpManifest() {
             date: { type: 'string' },
           },
           required: ['period'],
+        },
+      },
+      {
+        name: 'record_transaction',
+        description:
+          'Record bookkeeping transactions using a flexible object payload (expense, sale, purchase, or custom types).',
+        readOnlyHint: false,
+        openWorldHint: false,
+        destructiveHint: true,
+        annotations: {
+          readOnlyHint: false,
+          openWorldHint: false,
+          destructiveHint: true,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            transaction: {
+              type: 'object',
+              description: 'Flexible transaction object. Recommended fields: type, amount, currency, category, description, date.',
+            },
+            transaction_type: { type: 'string' },
+            amount: { type: 'number' },
+            currency: { type: 'string' },
+            category: { type: 'string' },
+            description: { type: 'string' },
+            date: { type: 'string' },
+            payment_mode: { type: 'string' },
+            entity_id: { type: 'string' },
+            tags: { type: 'array', items: { type: 'string' } },
+            metadata: { type: 'object' },
+          },
+          required: ['transaction'],
+        },
+      },
+      {
+        name: 'get_cash_flow',
+        description:
+          'Get inflow, outflow, and net cash flow summary from recorded bookkeeping transactions.',
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            period: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
+            date: { type: 'string' },
+            entity_id: { type: 'string' },
+            currency: { type: 'string' },
+            inflow_types: { type: 'array', items: { type: 'string' } },
+            outflow_types: { type: 'array', items: { type: 'string' } },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'get_finance_summary',
+        description:
+          'Get revenue, expense, profit, pending receivables, and pending payables from transaction records.',
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            period: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
+            date: { type: 'string' },
+            entity_id: { type: 'string' },
+            currency: { type: 'string' },
+            revenue_types: { type: 'array', items: { type: 'string' } },
+            expense_types: { type: 'array', items: { type: 'string' } },
+            pending_statuses: { type: 'array', items: { type: 'string' } },
+          },
+          required: [],
         },
       },
     ],

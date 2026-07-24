@@ -2,7 +2,7 @@
 
 ## Overview
 
-Dev-Ron is a **Model Context Protocol (MCP) server** that provides intelligent data management with 10 specialized tools for:
+Dev-Ron is a **Model Context Protocol (MCP) server** that provides intelligent data management with 15 specialized tools for:
 - Entity management (leads, clients, contacts, etc.)
 - Smart consolidation & deduplication
 - Relationship mapping
@@ -22,7 +22,100 @@ In Claude.ai Settings → Connectors:
 3. Click "Add"
 4. When it asks to "Connect", click "Connect"
 
-The endpoint is ready. All 10 tools will be available immediately.
+The endpoint is ready. All 15 tools will be available immediately.
+
+## Database Migration (Copy-Paste Steps)
+
+Do this before heavy usage so schema and policies are safe.
+
+1. Open Supabase SQL Editor for your project.
+2. Open this file from repo and copy all SQL:
+    - `migrations/20260724_safe_legacy_alignment.sql`
+3. Paste and run once.
+4. Confirm success with this check query:
+
+```sql
+SELECT schemaname, tablename, policyname
+FROM pg_policies
+WHERE schemaname = 'public'
+   AND tablename IN ('entities', 'activities', 'metrics')
+ORDER BY tablename, policyname;
+```
+
+5. If result shows `tenant_isolation_entities`, `tenant_isolation_activities`, and `tenant_isolation_metrics`, migration is good.
+
+## First-Run Identity Bootstrap (Recommended)
+
+Right after connector setup, save your identity so MCP and AI understand who you are in this tenant.
+
+### Option A: Ask Claude directly
+
+Paste this as your first message after connection:
+
+```text
+Run set_profile with profile_type=person and save this data:
+name: Your Name
+phone: Your Phone
+email: your@email.com
+role: Founder
+```
+
+Then save your business profile:
+
+```text
+Run set_profile with profile_type=business and save this data:
+company_name: Your Company
+industry: Your Industry
+website: https://your-domain.com
+owner_name: Your Name
+```
+
+### Option B: Direct MCP payload examples
+
+Personal profile:
+
+```json
+{
+   "tool": "set_profile",
+   "input": {
+      "profile_type": "person",
+      "data": {
+         "name": "Your Name",
+         "phone": "8800815510",
+         "email": "you@example.com",
+         "role": "Founder"
+      }
+   }
+}
+```
+
+Business profile:
+
+```json
+{
+   "tool": "set_profile",
+   "input": {
+      "profile_type": "business",
+      "data": {
+         "company_name": "Your Company",
+         "industry": "Your Industry",
+         "website": "https://your-domain.com",
+         "owner_name": "Your Name"
+      }
+   }
+}
+```
+
+Verify saved profile:
+
+```json
+{
+   "tool": "get_profile",
+   "input": {
+      "profile_type": "person"
+   }
+}
+```
 
 ### Security Model (Important)
 
@@ -41,7 +134,11 @@ The endpoint is ready. All 10 tools will be available immediately.
 **Try Option B: Use Alternative Endpoint**
 If the above doesn't work, Claude.ai might need a simpler endpoint format. Contact support with the error reference ID shown in Claude.ai.
 
-## Available Tools (10 total)
+## Available Tools (15 total)
+
+### Identity
+- **set_profile** - Save/update owner profile (person or business)
+- **get_profile** - Retrieve owner profile for current tenant
 
 ### Data Management
 - **add_data** - Create/update entities with automatic deduplication
@@ -56,6 +153,62 @@ If the above doesn't work, Claude.ai might need a simpler endpoint format. Conta
 ### Metrics & Analytics
 - **record_metric** - Store KPIs and metrics
 - **get_metrics** - Retrieve and aggregate metrics
+
+### Bookkeeping
+- **record_transaction** - Record sale, purchase, expense, income, refund, or transfer entries
+- **get_cash_flow** - Get inflow, outflow, and net cash flow for a period
+- **get_finance_summary** - Get revenue, expense, gross profit, pending receivables, and pending payables
+
+Example transaction (object-first):
+
+```json
+{
+   "tool": "record_transaction",
+   "input": {
+      "transaction": {
+         "type": "expense",
+         "amount": 2500,
+         "currency": "INR",
+         "category": "marketing",
+         "description": "Meta ads spend",
+         "date": "2026-07-23",
+         "invoice_no": "INV-8821",
+         "vendor": "Meta"
+      },
+      "payment_mode": "upi",
+      "tags": ["ads", "performance"]
+   }
+}
+```
+
+Example cash flow with custom type mapping:
+
+```json
+{
+   "tool": "get_cash_flow",
+   "input": {
+      "period": "month",
+      "currency": "INR",
+      "inflow_types": ["sale", "income", "service_receipt"],
+      "outflow_types": ["expense", "purchase", "vendor_payment"]
+   }
+}
+```
+
+Example finance summary:
+
+```json
+{
+   "tool": "get_finance_summary",
+   "input": {
+      "period": "month",
+      "currency": "INR",
+      "revenue_types": ["sale", "income", "service_receipt"],
+      "expense_types": ["expense", "purchase", "vendor_payment"],
+      "pending_statuses": ["pending", "unpaid", "partial", "due"]
+   }
+}
+```
 
 ### Insights
 - **get_timeline** - Activity history
@@ -114,7 +267,7 @@ Once connected, you can ask Claude:
 
 ### "Tool not found"
 - Verify you're using the correct endpoint: `https://your-domain.com/api/mcp`
-- Check that all 10 tools are listed when you connect
+- Check that all 15 tools are listed when you connect
 
 ## API Endpoints
 

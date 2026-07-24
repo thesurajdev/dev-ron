@@ -1,5 +1,206 @@
 # Database Setup for Smart Entity System
 
+## Canonical Target Model (Recommended)
+
+This system should answer one question:
+
+What happened, to whom, when, why, and how is it connected?
+
+Use this unified object graph schema as the target architecture.
+
+### Core tables (7)
+
+- objects
+- relations
+- events
+- activities
+- attachments
+- history
+- jobs
+
+Optional but recommended:
+
+- collections
+
+### Unified schema SQL
+
+Copy this into Supabase SQL Editor:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+
+-- 1) objects: everything in business is an object
+CREATE TABLE IF NOT EXISTS objects (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  title TEXT,
+  status TEXT,
+  properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_objects_user_id ON objects(user_id);
+CREATE INDEX IF NOT EXISTS idx_objects_type ON objects(type);
+CREATE INDEX IF NOT EXISTS idx_objects_status ON objects(status);
+CREATE INDEX IF NOT EXISTS idx_objects_properties_gin ON objects USING GIN(properties);
+CREATE INDEX IF NOT EXISTS idx_objects_title_trgm ON objects USING GIN(title gin_trgm_ops);
+
+-- 2) relations: graph edges between objects
+CREATE TABLE IF NOT EXISTS relations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  from_object UUID NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  relation TEXT NOT NULL,
+  to_object UUID NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  confidence NUMERIC NOT NULL DEFAULT 100,
+  properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, from_object, relation, to_object)
+);
+
+CREATE INDEX IF NOT EXISTS idx_relations_user_id ON relations(user_id);
+CREATE INDEX IF NOT EXISTS idx_relations_from_object ON relations(from_object);
+CREATE INDEX IF NOT EXISTS idx_relations_to_object ON relations(to_object);
+CREATE INDEX IF NOT EXISTS idx_relations_relation ON relations(relation);
+
+-- 3) events: immutable business facts over time
+CREATE TABLE IF NOT EXISTS events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  object_id UUID REFERENCES objects(id) ON DELETE SET NULL,
+  performed_by UUID REFERENCES objects(id) ON DELETE SET NULL,
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_user_id ON events(user_id);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+CREATE INDEX IF NOT EXISTS idx_events_object_id ON events(object_id);
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_payload_gin ON events USING GIN(payload);
+
+-- 4) activities: interactions/conversations connected to many objects
+CREATE TABLE IF NOT EXISTS activities (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  summary TEXT,
+  content JSONB NOT NULL DEFAULT '{}'::jsonb,
+  object_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
+  direction TEXT,
+  channel TEXT,
+  happened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activities_user_id_v2 ON activities(user_id);
+CREATE INDEX IF NOT EXISTS idx_activities_type_v2 ON activities(type);
+CREATE INDEX IF NOT EXISTS idx_activities_happened_at ON activities(happened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activities_object_ids_gin ON activities USING GIN(object_ids);
+CREATE INDEX IF NOT EXISTS idx_activities_content_gin ON activities USING GIN(content);
+
+-- 5) attachments: files linked to any object/event/activity
+CREATE TABLE IF NOT EXISTS attachments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT,
+  mime_type TEXT,
+  storage_path TEXT,
+  url TEXT,
+  size_bytes BIGINT,
+  checksum TEXT,
+  object_id UUID REFERENCES objects(id) ON DELETE SET NULL,
+  event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+  activity_id UUID REFERENCES activities(id) ON DELETE SET NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_user_id ON attachments(user_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_object_id ON attachments(object_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_event_id ON attachments(event_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_activity_id ON attachments(activity_id);
+
+-- 6) history: before/after snapshots of changes
+CREATE TABLE IF NOT EXISTS history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  object_id UUID REFERENCES objects(id) ON DELETE SET NULL,
+  event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  before_state JSONB,
+  after_state JSONB,
+  changed_fields TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_history_user_id ON history(user_id);
+CREATE INDEX IF NOT EXISTS idx_history_object_id ON history(object_id);
+CREATE INDEX IF NOT EXISTS idx_history_event_id ON history(event_id);
+CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC);
+
+-- 7) jobs: background AI/system work
+CREATE TABLE IF NOT EXISTS jobs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  priority INTEGER NOT NULL DEFAULT 0,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result JSONB,
+  error JSONB,
+  run_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_run_at ON jobs(run_at);
+
+-- Optional 8) collections: dynamic groups/folders
+CREATE TABLE IF NOT EXISTS collections (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'dynamic',
+  query JSONB,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS collection_objects (
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  object_id UUID NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+  added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (collection_id, object_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_objects_object_id ON collection_objects(object_id);
+```
+
+### Migration note
+
+The current runtime still uses legacy tables (entities, activities, metrics).
+
+Adopt the unified model in phases:
+
+1. Create the new tables above in parallel.
+2. Add dual-write from MCP handlers to both old and new schemas.
+3. Move reads to objects/relations/events progressively.
+4. Remove legacy tables after full parity and verification.
+
 ## 1. Create Tables in Supabase
 
 Copy and paste this SQL into your Supabase SQL Editor:
