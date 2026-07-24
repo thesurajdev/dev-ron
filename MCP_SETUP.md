@@ -1,224 +1,77 @@
-# Dev-Ron MCP Server Setup for Claude.ai
+# Dev-Ron MCP Setup (Core Graph Only)
 
-## Overview
+## Goal
 
-Dev-Ron is a **Model Context Protocol (MCP) server** that provides intelligent data management with 18 specialized tools for:
-- Entity management (leads, clients, contacts, etc.)
-- Smart consolidation & deduplication
-- Relationship mapping
-- Metrics tracking
-- Search & retrieval
+This setup is intentionally minimal and focused on one question:
 
-## For Claude.ai Integration
+What happened, to whom, when, why, and how is it connected?
 
-### Quick Setup - Try This First
+## Core Architecture
 
-In Claude.ai Settings → Connectors:
+Only these core tables are used as the business memory model:
 
-1. **Click "Add custom connector"** (or if RON exists, remove it first)
-2. Fill in:
-   - **Name:** Dev-Ron
-   - **Remote MCP server URL:** `https://your-domain.com/api/mcp`
-3. Click "Add"
-4. When it asks to "Connect", click "Connect"
+- objects
+- relations
+- events
+- activities
+- attachments
+- history
+- jobs
 
-The endpoint is ready. All 18 tools will be available immediately.
+Optional:
 
-## Database Migration (Copy-Paste Steps)
+- collections
 
-Do this before heavy usage so schema and policies are safe.
+## Connector Setup
 
-1. Open Supabase SQL Editor for your project.
-2. Open this file from repo and copy all SQL:
-    - `migrations/20260724_safe_legacy_alignment.sql`
-3. Paste and run once.
-4. Confirm success with this check query:
+In Claude.ai Settings -> Connectors:
 
-```sql
-SELECT schemaname, tablename, policyname
-FROM pg_policies
-WHERE schemaname = 'public'
-   AND tablename IN ('entities', 'activities', 'metrics')
-ORDER BY tablename, policyname;
-```
+1. Click Add custom connector.
+2. Name: Dev-Ron
+3. Remote MCP server URL: https://your-domain.com/api/mcp
+4. Click Connect.
 
-5. If result shows `tenant_isolation_entities`, `tenant_isolation_activities`, and `tenant_isolation_metrics`, migration is good.
+## Database Migrations (Run in Order)
 
-### Phase 2 (Unified Graph Tables)
+1. Phase 1 (safe legacy alignment):
+   - migrations/20260724_safe_legacy_alignment.sql
+2. Phase 2 (create unified graph tables):
+   - migrations/20260724_phase2_unified_graph_tables.sql
+3. Phase 3 (backfill existing data):
+   - migrations/20260724_phase3_backfill_unified_graph.sql
 
-After Phase 1, create unified graph tables in parallel.
+## Core MCP Tools (Minimal)
 
-1. Open and copy all SQL from:
-    - `migrations/20260724_phase2_unified_graph_tables.sql`
-2. Paste in Supabase SQL Editor and run.
-3. Verify with:
+- add_data
+- search
+- graph_get_object
+- graph_get_connections
+- graph_get_timeline
+- get_summary
+
+These are the only tools exposed in manifest to keep usage simple and aligned with the graph model.
+
+## Verification Queries
+
+Verify graph tables:
 
 ```sql
 SELECT table_name
 FROM information_schema.tables
 WHERE table_schema = 'public'
-   AND table_name IN (
-      'objects','relations','events','history','attachments','jobs','collections','collection_objects'
-   )
+  AND table_name IN (
+    'objects','relations','events','activities','attachments','history','jobs','collections','collection_objects'
+  )
 ORDER BY table_name;
 ```
 
-### Phase 3 (Backfill Existing Data)
-
-After Phase 2 tables exist, backfill legacy data into unified graph tables.
-
-1. Open and copy all SQL from:
-   - `migrations/20260724_phase3_backfill_unified_graph.sql`
-2. Paste in Supabase SQL Editor and run.
-3. Verify row counts:
+Verify backfill counts:
 
 ```sql
 SELECT 'objects' AS table_name, COUNT(*) AS total FROM objects
 UNION ALL SELECT 'relations', COUNT(*) FROM relations
 UNION ALL SELECT 'events', COUNT(*) FROM events
 UNION ALL SELECT 'history', COUNT(*) FROM history;
-```
-
-## First-Run Identity Bootstrap (Recommended)
-
-Right after connector setup, save your identity so MCP and AI understand who you are in this tenant.
-
-### Option A: Ask Claude directly
-
-Paste this as your first message after connection:
-
-```text
-Run set_profile with profile_type=person and save this data:
-name: Your Name
-phone: Your Phone
-email: your@email.com
-role: Founder
-```
-
-Then save your business profile:
-
-```text
-Run set_profile with profile_type=business and save this data:
-company_name: Your Company
-industry: Your Industry
-website: https://your-domain.com
-owner_name: Your Name
-```
-
-### Option B: Direct MCP payload examples
-
-Personal profile:
-
-```json
-{
-   "tool": "set_profile",
-   "input": {
-      "profile_type": "person",
-      "data": {
-         "name": "Your Name",
-         "phone": "8800815510",
-         "email": "you@example.com",
-         "role": "Founder"
-      }
-   }
-}
-```
-
-Business profile:
-
-```json
-{
-   "tool": "set_profile",
-   "input": {
-      "profile_type": "business",
-      "data": {
-         "company_name": "Your Company",
-         "industry": "Your Industry",
-         "website": "https://your-domain.com",
-         "owner_name": "Your Name"
-      }
-   }
-}
-```
-
-Verify saved profile:
-
-```json
-{
-   "tool": "get_profile",
-   "input": {
-      "profile_type": "person"
-   }
-}
-```
-
-### Security Model (Important)
-
-- `GET /api/mcp` is public for connector discovery.
-- `POST /api/mcp` requires OAuth Bearer token.
-- Every tool call is bound to a tenant scope derived from the OAuth client.
-- Queries and writes are tenant-scoped only; no cross-tenant fallback is allowed.
-
-### If "Connection issue" error appears:
-
-**Try Option A: Remove and Re-add**
-1. Remove the connector (3-dot menu → Remove)
-2. Add it again with exact URL: `https://your-domain.com/api/mcp`
-3. Click "Connect" again
-
-**Try Option B: Use Alternative Endpoint**
-If the above doesn't work, Claude.ai might need a simpler endpoint format. Contact support with the error reference ID shown in Claude.ai.
-
-## Available Tools (18 total)
-
-### Identity
-- **set_profile** - Save/update owner profile (person or business)
-- **get_profile** - Retrieve owner profile for current tenant
-
-### Data Management
-- **add_data** - Create/update entities with automatic deduplication
-- **get_entity** - Retrieve entity details
-- **search** - Full-text search across all data
-
-### Relationships
-- **link_entities** - Create relationships between entities
-- **get_related** - Find connected entities
-- **merge_entities** - Consolidate duplicates
-
-### Metrics & Analytics
-- **record_metric** - Store KPIs and metrics
-- **get_metrics** - Retrieve and aggregate metrics
-
-### Bookkeeping
-- **record_transaction** - Record sale, purchase, expense, income, refund, or transfer entries
-- **get_cash_flow** - Get inflow, outflow, and net cash flow for a period
-- **get_finance_summary** - Get revenue, expense, gross profit, pending receivables, and pending payables
-
-### Graph-First Reads
-- **graph_get_object** - Read one object directly from unified objects table
-- **graph_get_connections** - Read incoming/outgoing relations and connected objects
-- **graph_get_timeline** - Read object event timeline from unified events table
-
-Example transaction (object-first):
-
-```json
-{
-   "tool": "record_transaction",
-   "input": {
-      "transaction": {
-         "type": "expense",
-         "amount": 2500,
-         "currency": "INR",
-         "category": "marketing",
-         "description": "Meta ads spend",
-         "date": "2026-07-23",
-         "invoice_no": "INV-8821",
-         "vendor": "Meta"
-      },
-      "payment_mode": "upi",
-      "tags": ["ads", "performance"]
-   }
-}
 ```
 
 Example cash flow with custom type mapping:
@@ -307,7 +160,7 @@ Once connected, you can ask Claude:
 
 ### "Tool not found"
 - Verify you're using the correct endpoint: `https://your-domain.com/api/mcp`
-- Check that all 18 tools are listed when you connect
+- If you need advanced tools, set `MCP_SIMPLE_MODE=false` and reconnect
 
 ## API Endpoints
 

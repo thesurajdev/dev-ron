@@ -1164,15 +1164,17 @@ function getDateRange(period: 'day' | 'week' | 'month' | 'year', referenceDate?:
  */
 export function getMcpManifest() {
   const baseUrl = (process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
-  return {
-    protocol: 'mcp',
-    version: '2.0.0',
-    server_name: 'dev-ron AI Business OS MCP',
-    server_url: `${baseUrl}/api/mcp`,
-    name: 'dev-ron AI Business OS MCP',
-    description:
-      'AI-native business operating system memory interface that transforms raw input into connected business knowledge',
-    tools: [
+  const coreToolNames = new Set([
+    'add_data',
+    'search',
+    'graph_get_object',
+    'graph_get_connections',
+    'graph_get_timeline',
+    'get_summary',
+  ]);
+
+  const allTools = [
+    
       {
         name: 'set_profile',
         description:
@@ -1598,7 +1600,19 @@ export function getMcpManifest() {
           required: ['object_id'],
         },
       },
-    ],
+    ];
+
+  const tools = allTools.filter((tool: any) => coreToolNames.has(tool.name));
+
+  return {
+    protocol: 'mcp',
+    version: '2.0.0',
+    server_name: 'dev-ron AI Business OS MCP',
+    server_url: `${baseUrl}/api/mcp`,
+    name: 'dev-ron AI Business OS MCP',
+    description:
+      'AI-native business operating system memory interface that transforms raw input into connected business knowledge',
+    tools,
     resources: [],
   };
 }
