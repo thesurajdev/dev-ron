@@ -10,6 +10,147 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');
 
+const unifiedTableAvailability: Record<string, boolean | undefined> = {};
+
+function isMissingTableError(error: any): boolean {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return code === '42P01' || message.includes('does not exist');
+}
+
+async function runWithUnifiedTable(table: string, op: () => Promise<void>) {
+  if (unifiedTableAvailability[table] === false) return;
+
+  try {
+    await op();
+    unifiedTableAvailability[table] = true;
+  } catch (error: any) {
+    if (isMissingTableError(error)) {
+      unifiedTableAvailability[table] = false;
+      console.warn(`[dual-write] '${table}' table unavailable, skipping unified writes.`);
+      return;
+    }
+    // Keep core runtime resilient: unified writes are best-effort.
+    console.warn(`[dual-write] failed writing to '${table}': ${error?.message || error}`);
+  }
+}
+
+function deriveObjectTitle(data: Record<string, any>): string | null {
+  const candidates = [
+    data?.title,
+    data?.name,
+    data?.company_name,
+    data?.company,
+    data?.subject,
+    data?.invoice_no,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) return value;
+  }
+
+  return null;
+}
+
+async function mirrorEntityAsObject(
+  userId: string,
+  entityId: string,
+  entityType: string,
+  data: Record<string, any>
+) {
+  await runWithUnifiedTable('objects', async () => {
+    const objectRow = {
+      id: entityId,
+      user_id: userId,
+      type: entityType || 'unknown',
+      title: deriveObjectTitle(data || {}),
+      status: data?.status ? String(data.status) : null,
+      properties: data || {},
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('objects')
+      .upsert(objectRow, { onConflict: 'id' });
+
+    if (error) throw error;
+  });
+}
+
+async function mirrorRelation(
+  userId: string,
+  fromObject: string,
+  relation: string,
+  toObject: string,
+  confidence = 100,
+  properties: Record<string, any> = {}
+) {
+  await runWithUnifiedTable('relations', async () => {
+    const relationRow = {
+      user_id: userId,
+      from_object: fromObject,
+      relation,
+      to_object: toObject,
+      confidence,
+      properties,
+      created_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('relations')
+      .upsert(relationRow, { onConflict: 'user_id,from_object,relation,to_object' });
+
+    if (error) throw error;
+  });
+}
+
+async function mirrorEvent(
+  userId: string,
+  type: string,
+  objectId: string | null,
+  payload: Record<string, any>
+) {
+  await runWithUnifiedTable('events', async () => {
+    const { error } = await supabase
+      .from('events')
+      .insert({
+        user_id: userId,
+        type,
+        object_id: objectId,
+        timestamp: new Date().toISOString(),
+        payload,
+      });
+
+    if (error) throw error;
+  });
+}
+
+async function mirrorHistory(
+  userId: string,
+  objectId: string,
+  action: string,
+  beforeState: Record<string, any> | null,
+  afterState: Record<string, any> | null,
+  changedFields: string[] = []
+) {
+  await runWithUnifiedTable('history', async () => {
+    const { error } = await supabase
+      .from('history')
+      .insert({
+        user_id: userId,
+        object_id: objectId,
+        action,
+        before_state: beforeState,
+        after_state: afterState,
+        changed_fields: changedFields,
+        created_at: new Date().toISOString(),
+      });
+
+    if (error) throw error;
+  });
+}
+
 function toUuidList(involvedEntities: Array<{ entity_id: string; role: string }> = []): string[] {
   return involvedEntities
     .map((e) => String(e?.entity_id || '').trim())
@@ -252,6 +393,7 @@ export async function findOrCreateEntity(
 
     // Strong confidence match means same entity; update instead of creating duplicate.
     if (bestMatch.score >= 70) {
+      await mirrorEntityAsObject(userId, bestMatch.id, entityType, data || {});
       return bestMatch.id;
     }
   }
@@ -270,6 +412,14 @@ export async function findOrCreateEntity(
     .single();
 
   if (error) throw error;
+
+  await mirrorEntityAsObject(userId, newEntity.id, entityType, data || {});
+  await mirrorEvent(userId, 'entity_created', newEntity.id, {
+    entity_type: entityType,
+    data,
+    tags,
+  });
+
   return newEntity.id;
 }
 
@@ -383,7 +533,7 @@ export async function updateEntity(
 ) {
   const { data: entity } = await supabase
     .from('entities')
-    .select('data, history')
+    .select('data, history, entity_type')
     .eq('id', entityId)
     .eq('user_id', userId)
     .single();
@@ -422,6 +572,20 @@ export async function updateEntity(
     .eq('user_id', userId);
 
   if (error) throw error;
+
+  await mirrorEntityAsObject(userId, entityId, entity.entity_type || 'unknown', mergedData || {});
+  await mirrorHistory(
+    userId,
+    entityId,
+    activityType || 'entity_updated',
+    entity.data || {},
+    mergedData || {},
+    changedFields
+  );
+  await mirrorEvent(userId, activityType || 'entity_updated', entityId, {
+    new_data: newData,
+    changed_fields: changedFields,
+  });
 }
 
 /**
@@ -610,10 +774,18 @@ export async function addActivity(
   };
 
   const withV2Attempt = await supabase.from('activities').insert(withV2Payload);
-  if (!withV2Attempt.error) return;
+  if (withV2Attempt.error) {
+    const fallbackAttempt = await supabase.from('activities').insert(basePayload);
+    if (fallbackAttempt.error) throw fallbackAttempt.error;
+  }
 
-  const fallbackAttempt = await supabase.from('activities').insert(basePayload);
-  if (fallbackAttempt.error) throw fallbackAttempt.error;
+  const primaryObjectId = involvedEntities[0]?.entity_id || null;
+  await mirrorEvent(userId, activityType, primaryObjectId, {
+    source: 'activity',
+    data,
+    involved_entities: involvedEntities,
+    tags,
+  });
 }
 
 /**
@@ -675,6 +847,12 @@ export async function recordMetric(
     });
 
   if (error) throw error;
+
+  await mirrorEvent(userId, 'metric_recorded', entityId || null, {
+    metric_name: metricName,
+    value: numericValue,
+    tags,
+  });
 }
 
 /**
@@ -704,6 +882,117 @@ export async function getMetrics(
 
   const { data, error } = await q;
 
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Graph-first: get one object row.
+ */
+export async function getGraphObject(userId: string, objectId: string) {
+  const { data, error } = await supabase
+    .from('objects')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', objectId)
+    .single();
+
+  if (error?.code === 'PGRST116') {
+    throw new Error('Object not found in user scope');
+  }
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Graph-first: get object relations and hydrate connected nodes.
+ */
+export async function getGraphConnections(
+  userId: string,
+  objectId: string,
+  relation?: string,
+  direction: 'outgoing' | 'incoming' | 'both' = 'both'
+) {
+  let outgoing: any[] = [];
+  let incoming: any[] = [];
+
+  if (direction === 'outgoing' || direction === 'both') {
+    let q = supabase
+      .from('relations')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('from_object', objectId);
+
+    if (relation) q = q.eq('relation', relation);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    outgoing = data || [];
+  }
+
+  if (direction === 'incoming' || direction === 'both') {
+    let q = supabase
+      .from('relations')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('to_object', objectId);
+
+    if (relation) q = q.eq('relation', relation);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    incoming = data || [];
+  }
+
+  const allObjectIds = Array.from(
+    new Set(
+      [...outgoing.map((r) => r.to_object), ...incoming.map((r) => r.from_object)]
+        .filter(Boolean)
+        .map((id) => String(id))
+    )
+  );
+
+  let connectedObjects: any[] = [];
+  if (allObjectIds.length > 0) {
+    const { data, error } = await supabase
+      .from('objects')
+      .select('*')
+      .eq('user_id', userId)
+      .in('id', allObjectIds);
+
+    if (error) throw error;
+    connectedObjects = data || [];
+  }
+
+  return {
+    outgoing,
+    incoming,
+    connected_objects: connectedObjects,
+  };
+}
+
+/**
+ * Graph-first: get events linked to an object.
+ */
+export async function getGraphTimeline(
+  userId: string,
+  objectId: string,
+  limit = 100,
+  eventType?: string
+) {
+  let q = supabase
+    .from('events')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('object_id', objectId)
+    .order('timestamp', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 500));
+
+  if (eventType) {
+    q = q.eq('type', eventType);
+  }
+
+  const { data, error } = await q;
   if (error) throw error;
   return data || [];
 }
@@ -771,6 +1060,17 @@ export async function linkEntities(
     .update({ related_to: relatedTo2 })
     .eq('id', entityId2)
     .eq('user_id', userId);
+
+  await mirrorRelation(userId, entityId1, relationshipType, entityId2, 100, {
+    source: 'link_entities',
+  });
+  await mirrorRelation(userId, entityId2, relationshipType, entityId1, 100, {
+    source: 'link_entities_reverse',
+  });
+  await mirrorEvent(userId, 'relation_linked', entityId1, {
+    to_object: entityId2,
+    relation: relationshipType,
+  });
 }
 
 /**
@@ -783,14 +1083,14 @@ export async function mergeEntities(
 ) {
   const { data: primary } = await supabase
     .from('entities')
-    .select('data, history, related_to')
+    .select('data, history, related_to, entity_type')
     .eq('id', primaryId)
     .eq('user_id', userId)
     .single();
 
   const { data: duplicate } = await supabase
     .from('entities')
-    .select('data, history, related_to')
+    .select('data, history, related_to, entity_type')
     .eq('id', duplicateId)
     .eq('user_id', userId)
     .single();
@@ -833,4 +1133,18 @@ export async function mergeEntities(
     .delete()
     .eq('id', duplicateId)
     .eq('user_id', userId);
+
+  await mirrorEntityAsObject(userId, primaryId, primary.entity_type || 'unknown', mergedData || {});
+  await mirrorHistory(
+    userId,
+    primaryId,
+    'entity_merged',
+    primary.data || {},
+    mergedData || {},
+    ['merged_from']
+  );
+  await mirrorEvent(userId, 'entity_merged', primaryId, {
+    primary_id: primaryId,
+    merged_id: duplicateId,
+  });
 }

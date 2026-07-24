@@ -294,3 +294,31 @@ export interface GetFinanceSummaryInput {
   expense_types?: string[];
   pending_statuses?: string[];
 }
+
+/**
+ * Graph-first: get one object from unified `objects` table.
+ */
+export interface GraphGetObjectInput {
+  user_id: string;
+  object_id: string;
+}
+
+/**
+ * Graph-first: get relations/connections for an object.
+ */
+export interface GraphGetConnectionsInput {
+  user_id: string;
+  object_id: string;
+  relation?: string;
+  direction?: 'outgoing' | 'incoming' | 'both';
+}
+
+/**
+ * Graph-first: get event timeline for an object.
+ */
+export interface GraphGetTimelineInput {
+  user_id: string;
+  object_id: string;
+  limit?: number;
+  event_type?: string;
+}

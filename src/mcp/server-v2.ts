@@ -15,6 +15,9 @@ import {
   getActivities,
   recordMetric,
   getMetrics,
+  getGraphObject,
+  getGraphConnections,
+  getGraphTimeline,
   linkEntities,
   mergeEntities,
 } from '../storage/supabase.js';
@@ -34,6 +37,9 @@ import type {
   RecordTransactionInput,
   GetCashFlowInput,
   GetFinanceSummaryInput,
+  GraphGetObjectInput,
+  GraphGetConnectionsInput,
+  GraphGetTimelineInput,
 } from '../types/index.js';
 
 /**
@@ -1044,6 +1050,79 @@ export const MCP_HANDLERS: Record<string, (input: any) => Promise<any>> = {
       return response(false, null, err.message);
     }
   },
+
+  /**
+   * Graph-first: get one object from unified model.
+   */
+  graph_get_object: async (input: GraphGetObjectInput) => {
+    try {
+      const normalized = withUserId(input);
+      const { user_id, object_id } = normalized;
+
+      const object = await getGraphObject(user_id, object_id);
+
+      return response(true, {
+        object: {
+          id: object.id,
+          type: object.type,
+          title: object.title,
+          status: object.status,
+          properties: object.properties,
+          created_at: object.created_at,
+          updated_at: object.updated_at,
+          deleted_at: object.deleted_at,
+        },
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
+
+  /**
+   * Graph-first: get incoming/outgoing connections for an object.
+   */
+  graph_get_connections: async (input: GraphGetConnectionsInput) => {
+    try {
+      const normalized = withUserId(input);
+      const { user_id, object_id, relation, direction = 'both' } = normalized;
+
+      const graph = await getGraphConnections(user_id, object_id, relation, direction);
+
+      return response(true, {
+        object_id,
+        relation: relation || null,
+        direction,
+        outgoing_count: graph.outgoing.length,
+        incoming_count: graph.incoming.length,
+        outgoing: graph.outgoing,
+        incoming: graph.incoming,
+        connected_objects: graph.connected_objects,
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
+
+  /**
+   * Graph-first: get object event timeline.
+   */
+  graph_get_timeline: async (input: GraphGetTimelineInput) => {
+    try {
+      const normalized = withUserId(input);
+      const { user_id, object_id, limit = 100, event_type } = normalized;
+
+      const events = await getGraphTimeline(user_id, object_id, limit, event_type);
+
+      return response(true, {
+        object_id,
+        event_type: event_type || null,
+        count: events.length,
+        events,
+      });
+    } catch (err: any) {
+      return response(false, null, err.message);
+    }
+  },
 };
 
 /**
@@ -1453,6 +1532,70 @@ export function getMcpManifest() {
             pending_statuses: { type: 'array', items: { type: 'string' } },
           },
           required: [],
+        },
+      },
+      {
+        name: 'graph_get_object',
+        description: 'Graph-first read: fetch one object by id from unified objects table.',
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            object_id: { type: 'string' },
+          },
+          required: ['object_id'],
+        },
+      },
+      {
+        name: 'graph_get_connections',
+        description: 'Graph-first read: fetch incoming/outgoing relations and connected objects.',
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            object_id: { type: 'string' },
+            relation: { type: 'string' },
+            direction: { type: 'string', enum: ['outgoing', 'incoming', 'both'] },
+          },
+          required: ['object_id'],
+        },
+      },
+      {
+        name: 'graph_get_timeline',
+        description: 'Graph-first read: fetch event timeline for one object id.',
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          destructiveHint: false,
+        },
+        input_schema: {
+          type: 'object',
+          properties: {
+            user_id: { type: 'string' },
+            object_id: { type: 'string' },
+            limit: { type: 'number' },
+            event_type: { type: 'string' },
+          },
+          required: ['object_id'],
         },
       },
     ],

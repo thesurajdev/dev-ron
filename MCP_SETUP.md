@@ -2,7 +2,7 @@
 
 ## Overview
 
-Dev-Ron is a **Model Context Protocol (MCP) server** that provides intelligent data management with 15 specialized tools for:
+Dev-Ron is a **Model Context Protocol (MCP) server** that provides intelligent data management with 18 specialized tools for:
 - Entity management (leads, clients, contacts, etc.)
 - Smart consolidation & deduplication
 - Relationship mapping
@@ -22,7 +22,7 @@ In Claude.ai Settings → Connectors:
 3. Click "Add"
 4. When it asks to "Connect", click "Connect"
 
-The endpoint is ready. All 15 tools will be available immediately.
+The endpoint is ready. All 18 tools will be available immediately.
 
 ## Database Migration (Copy-Paste Steps)
 
@@ -43,6 +43,41 @@ ORDER BY tablename, policyname;
 ```
 
 5. If result shows `tenant_isolation_entities`, `tenant_isolation_activities`, and `tenant_isolation_metrics`, migration is good.
+
+### Phase 2 (Unified Graph Tables)
+
+After Phase 1, create unified graph tables in parallel.
+
+1. Open and copy all SQL from:
+    - `migrations/20260724_phase2_unified_graph_tables.sql`
+2. Paste in Supabase SQL Editor and run.
+3. Verify with:
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+   AND table_name IN (
+      'objects','relations','events','history','attachments','jobs','collections','collection_objects'
+   )
+ORDER BY table_name;
+```
+
+### Phase 3 (Backfill Existing Data)
+
+After Phase 2 tables exist, backfill legacy data into unified graph tables.
+
+1. Open and copy all SQL from:
+   - `migrations/20260724_phase3_backfill_unified_graph.sql`
+2. Paste in Supabase SQL Editor and run.
+3. Verify row counts:
+
+```sql
+SELECT 'objects' AS table_name, COUNT(*) AS total FROM objects
+UNION ALL SELECT 'relations', COUNT(*) FROM relations
+UNION ALL SELECT 'events', COUNT(*) FROM events
+UNION ALL SELECT 'history', COUNT(*) FROM history;
+```
 
 ## First-Run Identity Bootstrap (Recommended)
 
@@ -134,7 +169,7 @@ Verify saved profile:
 **Try Option B: Use Alternative Endpoint**
 If the above doesn't work, Claude.ai might need a simpler endpoint format. Contact support with the error reference ID shown in Claude.ai.
 
-## Available Tools (15 total)
+## Available Tools (18 total)
 
 ### Identity
 - **set_profile** - Save/update owner profile (person or business)
@@ -158,6 +193,11 @@ If the above doesn't work, Claude.ai might need a simpler endpoint format. Conta
 - **record_transaction** - Record sale, purchase, expense, income, refund, or transfer entries
 - **get_cash_flow** - Get inflow, outflow, and net cash flow for a period
 - **get_finance_summary** - Get revenue, expense, gross profit, pending receivables, and pending payables
+
+### Graph-First Reads
+- **graph_get_object** - Read one object directly from unified objects table
+- **graph_get_connections** - Read incoming/outgoing relations and connected objects
+- **graph_get_timeline** - Read object event timeline from unified events table
 
 Example transaction (object-first):
 
@@ -267,7 +307,7 @@ Once connected, you can ask Claude:
 
 ### "Tool not found"
 - Verify you're using the correct endpoint: `https://your-domain.com/api/mcp`
-- Check that all 15 tools are listed when you connect
+- Check that all 18 tools are listed when you connect
 
 ## API Endpoints
 
