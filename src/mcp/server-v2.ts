@@ -1170,6 +1170,7 @@ export function getMcpManifest() {
     'graph_get_object',
     'graph_get_connections',
     'graph_get_timeline',
+    'get_timeline',
     'get_summary',
   ]);
 
