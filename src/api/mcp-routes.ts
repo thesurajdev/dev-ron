@@ -27,7 +27,7 @@ export interface MCPResponse {
  */
 export async function handleMCPAPI(body: MCPRequest): Promise<MCPResponse> {
   // @ts-ignore - Dynamic import
-  const { handleMCPRequest } = await import('./handler.js');
+  const { handleMCPRequest } = await import('../mcp/handler.js');
   return await handleMCPRequest(body);
 }
 
@@ -37,7 +37,7 @@ export async function handleMCPAPI(body: MCPRequest): Promise<MCPResponse> {
  */
 export async function getManifestAPI() {
   // @ts-ignore - Dynamic import
-  const { getMcpManifest } = await import('./server.js');
+  const { getMcpManifest } = await import('../mcp/server-v2.js');
   return getMcpManifest();
 }
 

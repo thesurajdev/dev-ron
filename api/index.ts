@@ -5,11 +5,39 @@ import express from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
 
-const OAUTH_SECRET =
-  process.env.MCP_OAUTH_SECRET ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  'dev-ron-insecure-oauth-secret';
+function isProductionRuntime(): boolean {
+  const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+  const vercelEnv = String(process.env.VERCEL_ENV || '').toLowerCase();
+  return nodeEnv === 'production' || vercelEnv === 'production';
+}
+
+function getProductionPreflightIssues() {
+  const issues: string[] = [];
+
+  if (!isProductionRuntime()) {
+    return issues;
+  }
+
+  if (!process.env.SUPABASE_URL) issues.push('SUPABASE_URL');
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) issues.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (!process.env.MCP_OAUTH_SECRET) issues.push('MCP_OAUTH_SECRET');
+  if (!process.env.PUBLIC_BASE_URL) issues.push('PUBLIC_BASE_URL');
+
+  return issues;
+}
+
+const PRODUCTION_PREFLIGHT_ISSUES = getProductionPreflightIssues();
+if (PRODUCTION_PREFLIGHT_ISSUES.length > 0) {
+  console.error(
+    `Production preflight failed. Missing required environment variables: ${PRODUCTION_PREFLIGHT_ISSUES.join(', ')}`
+  );
+}
+
+const OAUTH_SECRET = process.env.MCP_OAUTH_SECRET || '';
+if (!OAUTH_SECRET) {
+  console.warn('Warning: MCP_OAUTH_SECRET is missing. Using ephemeral in-memory secret for local runtime only.');
+}
+const SIGNING_SECRET = OAUTH_SECRET || crypto.randomBytes(32).toString('hex');
 const ACCESS_TOKEN_TTL_SECONDS = Number(process.env.MCP_ACCESS_TOKEN_TTL_SECONDS || 86400);
 const REFRESH_TOKEN_TTL_SECONDS = Number(process.env.MCP_REFRESH_TOKEN_TTL_SECONDS || 2592000);
 const AUTH_CODE_TTL_SECONDS = Number(process.env.MCP_AUTH_CODE_TTL_SECONDS || 600);
@@ -19,6 +47,132 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Support form-encoded OAuth requests
 
+app.use((req: any, res: any, next: any) => {
+  if (!isProductionRuntime() || PRODUCTION_PREFLIGHT_ISSUES.length === 0) {
+    return next();
+  }
+
+  if (req.path === '/health') {
+    return next();
+  }
+
+  return res.status(503).json({
+    error: 'server_misconfigured',
+    missing: PRODUCTION_PREFLIGHT_ISSUES,
+  });
+});
+
+const READ_SCOPES = new Set(['mcp:read', 'mcp:write']);
+const WRITE_SCOPE = 'mcp:write';
+const READ_ONLY_TOOLS = new Set([
+  'get_profile',
+  'get_entity',
+  'get_related',
+  'get_timeline',
+  'get_summary',
+  'search',
+  'get_metrics',
+  'get_cash_flow',
+  'get_finance_summary',
+  'graph_get_object',
+  'graph_get_connections',
+  'graph_get_timeline',
+]);
+
+function sanitizeErrorMessage(error: unknown): string {
+  const message = String(error || 'Internal error');
+  const lower = message.toLowerCase();
+
+  if (message.includes('<!DOCTYPE html') || message.includes('<html') || lower.includes('cloudflare')) {
+    return 'Upstream service request failed';
+  }
+
+  return message.length > 300 ? `${message.slice(0, 297)}...` : message;
+}
+
+function parseScopes(scope: string): Set<string> {
+  return new Set(
+    String(scope || '')
+      .split(/\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  );
+}
+
+function hasAnyReadScope(scopes: Set<string>): boolean {
+  for (const scope of READ_SCOPES) {
+    if (scopes.has(scope)) return true;
+  }
+  return false;
+}
+
+function getRequestedToolName(body: any): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+
+  if (body.jsonrpc === '2.0' && body.method === 'tools/call') {
+    return body?.params?.name;
+  }
+
+  if (typeof body.tool === 'string') {
+    return body.tool;
+  }
+
+  return undefined;
+}
+
+function ensureToolScope(body: any, scopeText: string) {
+  const toolName = getRequestedToolName(body);
+  if (!toolName) return { allowed: true as const };
+
+  const scopes = parseScopes(scopeText);
+  const isReadOnlyTool = READ_ONLY_TOOLS.has(toolName);
+
+  if (isReadOnlyTool) {
+    if (!hasAnyReadScope(scopes)) {
+      return {
+        allowed: false as const,
+        status: 403,
+        payload: {
+          error: 'insufficient_scope',
+          error_description: 'mcp:read scope required',
+          tool: toolName,
+        },
+      };
+    }
+    return { allowed: true as const };
+  }
+
+  if (!scopes.has(WRITE_SCOPE)) {
+    return {
+      allowed: false as const,
+      status: 403,
+      payload: {
+        error: 'insufficient_scope',
+        error_description: 'mcp:write scope required',
+        tool: toolName,
+      },
+    };
+  }
+
+  return { allowed: true as const };
+}
+
+app.use((err: any, _req: any, res: any, next: any) => {
+  if (!err) {
+    return next();
+  }
+
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'payload_too_large' });
+  }
+
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'invalid_json' });
+  }
+
+  return next(err);
+});
+
 function resolveBaseUrl(req?: any): string {
   const configured = process.env.PUBLIC_BASE_URL?.trim();
   if (configured) {
@@ -26,7 +180,8 @@ function resolveBaseUrl(req?: any): string {
   }
 
   const host = req?.headers?.host;
-  const proto = req?.headers?.['x-forwarded-proto'] || 'https';
+  const isLocalhost = String(host || '').includes('localhost') || String(host || '').includes('127.0.0.1');
+  const proto = req?.headers?.['x-forwarded-proto'] || (isLocalhost ? 'http' : 'https');
   if (host) {
     return `${proto}://${host}`;
   }
@@ -69,7 +224,7 @@ function base64urlDecode(value: string) {
 function signPayload(payload: Record<string, any>) {
   const payloadJson = JSON.stringify(payload);
   const encodedPayload = base64urlEncode(payloadJson);
-  const sig = crypto.createHmac('sha256', OAUTH_SECRET).update(encodedPayload).digest('base64url');
+  const sig = crypto.createHmac('sha256', SIGNING_SECRET).update(encodedPayload).digest('base64url');
   return `${encodedPayload}.${sig}`;
 }
 
@@ -79,7 +234,7 @@ function verifySignedPayload(token: string) {
     if (!encodedPayload || !providedSig) return null;
 
     const expectedSig = crypto
-      .createHmac('sha256', OAUTH_SECRET)
+      .createHmac('sha256', SIGNING_SECRET)
       .update(encodedPayload)
       .digest('base64url');
 
@@ -207,22 +362,38 @@ function validateMCPToken(req: any, res: any, next: any) {
 
   // Bind request to tenant scope derived from OAuth client.
   req.mcpUserId = `tenant:${tokenInfo.client_id}`;
+  req.mcpScope = tokenInfo.scope;
   
   next();
 }
 
 // Health - no imports needed
 app.get('/health', (_req: any, res: any) => {
-  res.json({ status: 'ok', version: 'v4', timestamp: new Date().toISOString() });
+  const misconfigured = isProductionRuntime() && PRODUCTION_PREFLIGHT_ISSUES.length > 0;
+  if (misconfigured) {
+    return res.status(503).json({
+      status: 'misconfigured',
+      version: 'v4',
+      missing: PRODUCTION_PREFLIGHT_ISSUES,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  return res.json({ status: 'ok', version: 'v4', timestamp: new Date().toISOString() });
 });
 
 // Manifest - dynamic import() for ESM src/ module
 app.get(['/api/mcp/manifest', '/manifest'], async (_req: any, res: any) => {
   try {
     const { getMcpManifest } = await import('../src/mcp/server-v2.js');
-    res.json(getMcpManifest());
+    const manifest = getMcpManifest();
+    const baseUrl = resolveBaseUrl(_req);
+    res.json({
+      ...manifest,
+      server_url: `${baseUrl}/api/mcp`,
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'manifest_unavailable' });
   }
 });
 
@@ -232,7 +403,11 @@ app.get(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
     console.log('[MCP GET] Request received');
     
     const module = await import('../src/mcp/server-v2.js');
-    const manifest = module.getMcpManifest();
+    const baseUrl = resolveBaseUrl(_req);
+    const manifest = {
+      ...module.getMcpManifest(),
+      server_url: `${baseUrl}/api/mcp`,
+    };
     
     console.log('[MCP GET] Manifest has', manifest.tools?.length || 0, 'tools');
     
@@ -246,12 +421,7 @@ app.get(['/api/mcp', '/mcp'], async (_req: any, res: any) => {
     res.json(manifest);
   } catch (err: any) {
     console.error('[MCP GET] Error:', err.message);
-    console.error('[MCP GET] Stack:', err.stack);
-    res.status(500).json({ 
-      error: 'Server error',
-      message: err.message,
-      type: err.name
-    });
+    res.status(500).json({ error: 'mcp_manifest_unavailable' });
   }
 });
 
@@ -263,6 +433,11 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
     console.log('[MCP POST] Tool:', req.body?.tool);
     console.log('[MCP POST] Body keys:', Object.keys(req.body || {}));
     console.log('[MCP POST] Auth header:', req.headers.authorization ? 'YES' : 'NO');
+
+    const scopeDecision = ensureToolScope(req.body, req.mcpScope || '');
+    if (!scopeDecision.allowed) {
+      return res.status(scopeDecision.status).json(scopeDecision.payload);
+    }
     
     // Import handler
     let handler;
@@ -272,10 +447,7 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
       console.log('[MCP POST] Handler loaded successfully');
     } catch (importErr: any) {
       console.error('[MCP POST] Import error:', importErr.message);
-      return res.status(500).json({ 
-        error: 'Failed to load MCP handler', 
-        details: importErr.message 
-      });
+      return res.status(500).json({ error: 'mcp_handler_unavailable' });
     }
     
     if (!handler) {
@@ -307,12 +479,7 @@ app.post(['/api/mcp', '/mcp'], validateMCPToken, async (req: any, res: any) => {
     res.json(response);
   } catch (err: any) {
     console.error('[MCP POST] Unhandled error:', err.message);
-    console.error('[MCP POST] Stack:', err.stack);
-    res.status(500).json({ 
-      error: 'Internal Server Error',
-      message: err?.message || 'Unknown error',
-      type: err?.name || 'Error'
-    });
+    res.status(500).json({ error: sanitizeErrorMessage(err?.message || 'Internal Server Error') });
   }
 });
 

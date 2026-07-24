@@ -6,7 +6,18 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { MCP_HANDLERS, getMcpManifest } from './server-v2.js';
+import { MCP_HANDLERS, getMcpManifest, validateToolInput } from './server-v2.js';
+
+function sanitizeErrorMessage(error: unknown): string {
+  const message = String(error || 'Internal error');
+  const lower = message.toLowerCase();
+
+  if (message.includes('<!DOCTYPE html') || message.includes('<html') || lower.includes('cloudflare')) {
+    return 'Upstream service request failed';
+  }
+
+  return message.length > 300 ? `${message.slice(0, 297)}...` : message;
+}
 
 async function main() {
   const server = new Server({
@@ -26,8 +37,10 @@ async function main() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const handler = MCP_HANDLERS[name];
+    const manifest = getMcpManifest();
+    const isExposed = (manifest.tools || []).some((tool: any) => tool?.name === name);
 
-    if (!handler) {
+    if (!handler || !isExposed) {
       return {
         content: [
           {
@@ -39,8 +52,21 @@ async function main() {
       };
     }
 
+    const validation = validateToolInput(name, (args || {}) as Record<string, any>);
+    if (!validation.ok) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: validation.error,
+          },
+        ],
+        isError: true,
+      };
+    }
+
     try {
-      const result = await handler(args);
+      const result = await handler(validation.data);
       return {
         content: [
           {
@@ -54,7 +80,7 @@ async function main() {
         content: [
           {
             type: 'text',
-            text: `Error executing tool: ${error.message}`,
+            text: `Error executing tool: ${sanitizeErrorMessage(error?.message)}`,
           },
         ],
         isError: true,

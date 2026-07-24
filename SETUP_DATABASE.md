@@ -201,6 +201,21 @@ Adopt the unified model in phases:
 3. Move reads to objects/relations/events progressively.
 4. Remove legacy tables after full parity and verification.
 
+### Production hardening (required)
+
+Before production rollout, apply these migration files in order:
+
+1. `migrations/20260724_safe_legacy_alignment.sql`
+2. `migrations/20260724_phase2_unified_graph_tables.sql`
+3. `migrations/20260724_phase3_backfill_unified_graph.sql`
+4. `migrations/20260724_phase4_production_tenant_rls.sql`
+
+Production runtime must use:
+
+1. `SUPABASE_SERVICE_ROLE_KEY` for backend writes.
+2. `MCP_OAUTH_SECRET` for token/code signing.
+3. `PUBLIC_BASE_URL` for correct OAuth/MCP discovery metadata.
+
 ## 1. Create Tables in Supabase
 
 Copy and paste this SQL into your Supabase SQL Editor:

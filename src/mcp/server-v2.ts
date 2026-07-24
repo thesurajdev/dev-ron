@@ -41,6 +41,7 @@ import type {
   GraphGetConnectionsInput,
   GraphGetTimelineInput,
 } from '../types/index.js';
+import { z } from 'zod';
 
 /**
  * Response helper
@@ -49,7 +50,24 @@ export function response(success: boolean, data?: any, error?: string) {
   if (success) {
     return { success: true, data };
   }
-  return { success: false, error: error || 'Unknown error' };
+  const safeError = sanitizeErrorMessage(error || 'Unknown error');
+  return { success: false, error: safeError };
+}
+
+function sanitizeErrorMessage(error: string): string {
+  const message = String(error || 'Unknown error');
+  const lower = message.toLowerCase();
+
+  // Prevent leaking upstream HTML pages and large internals to clients.
+  if (message.includes('<!DOCTYPE html') || message.includes('<html') || lower.includes('cloudflare')) {
+    return 'Upstream service request failed';
+  }
+
+  if (message.length > 300) {
+    return `${message.slice(0, 297)}...`;
+  }
+
+  return message;
 }
 
 const DEFAULT_MCP_USER_ID = process.env.DEFAULT_MCP_USER_ID?.trim();
@@ -201,6 +219,238 @@ function isOutflowType(type: string, outflowTypes: Set<string>): boolean {
 function normalizeStatus(value: any): string {
   return String(value || '').trim().toLowerCase();
 }
+
+const periodEnum = z.enum(['day', 'week', 'month', 'year']);
+const jsonObject = z.record(z.string(), z.any());
+const stringList = z.array(z.string().min(1));
+const optionalString = z.string().min(1).optional();
+
+const toolInputSchemas: Record<string, z.ZodTypeAny> = {
+  set_profile: z
+    .object({
+      user_id: optionalString,
+      profile_type: z.enum(['person', 'business']).optional(),
+      data: jsonObject,
+      tags: stringList.optional(),
+    })
+    .strict(),
+  get_profile: z
+    .object({
+      user_id: optionalString,
+      profile_type: z.enum(['person', 'business']).optional(),
+      include_history: z.boolean().optional(),
+    })
+    .strict(),
+  add_data: z
+    .object({
+      user_id: optionalString,
+      entity_type: optionalString,
+      data: jsonObject,
+      activity_type: optionalString,
+      activity_data: jsonObject.optional(),
+      related_to: z
+        .array(
+          z
+            .object({
+              entity_id: z.string().uuid(),
+              relationship_type: z.string().min(1),
+            })
+            .strict()
+        )
+        .optional(),
+      tags: stringList.optional(),
+      entity_id: z.string().uuid().optional(),
+      date: optionalString,
+    })
+    .strict(),
+  get_entity: z
+    .object({
+      user_id: optionalString,
+      entity_id: z.string().uuid().optional(),
+      search_query: optionalString,
+      entity_type: optionalString,
+      include_history: z.boolean().optional(),
+    })
+    .strict()
+    .refine((v) => Boolean(v.entity_id || v.search_query), {
+      message: 'Either entity_id or search_query is required',
+      path: ['entity_id'],
+    }),
+  get_related: z
+    .object({
+      user_id: optionalString,
+      entity_id: z.string().uuid(),
+      relationship_type: optionalString,
+      depth: z.number().int().positive().optional(),
+    })
+    .strict(),
+  get_timeline: z
+    .object({
+      user_id: optionalString,
+      entity_id: z.string().uuid().optional(),
+      period: periodEnum.optional(),
+      date: optionalString,
+    })
+    .strict(),
+  get_summary: z
+    .object({
+      user_id: optionalString,
+      period: periodEnum.optional(),
+      date: optionalString,
+      entity_id: z.string().uuid().optional(),
+      entity_type: optionalString,
+      include_metrics: z.boolean().optional(),
+    })
+    .strict(),
+  search: z
+    .object({
+      user_id: optionalString,
+      query: z.string().min(1),
+      entity_type: optionalString,
+      date_from: optionalString,
+      date_to: optionalString,
+      limit: z.number().int().positive().max(500).optional(),
+    })
+    .strict(),
+  link_entities: z
+    .object({
+      user_id: optionalString,
+      entity_id_1: z.string().uuid(),
+      entity_id_2: z.string().uuid(),
+      relationship_type: z.string().min(1),
+      notes: optionalString,
+    })
+    .strict(),
+  merge_entities: z
+    .object({
+      user_id: optionalString,
+      primary_entity_id: z.string().uuid(),
+      duplicate_entity_id: z.string().uuid(),
+    })
+    .strict(),
+  record_metric: z
+    .object({
+      user_id: optionalString,
+      metric_name: z.string().min(1),
+      value: z.union([z.number(), z.string().min(1)]),
+      entity_id: z.string().uuid().optional(),
+      date: optionalString,
+      tags: stringList.optional(),
+    })
+    .strict(),
+  get_metrics: z
+    .object({
+      user_id: optionalString,
+      metric_names: stringList.optional(),
+      entity_id: z.string().uuid().optional(),
+      period: periodEnum.optional(),
+      date: optionalString,
+    })
+    .strict(),
+  record_transaction: z
+    .object({
+      user_id: optionalString,
+      transaction: jsonObject,
+      amount: z.number().positive().optional(),
+      transaction_type: optionalString,
+      currency: optionalString,
+      category: optionalString,
+      description: optionalString,
+      date: optionalString,
+      payment_mode: optionalString,
+      entity_id: z.string().uuid().optional(),
+      tags: stringList.optional(),
+      metadata: jsonObject.optional(),
+    })
+    .strict(),
+  get_cash_flow: z
+    .object({
+      user_id: optionalString,
+      period: periodEnum.optional(),
+      date: optionalString,
+      entity_id: z.string().uuid().optional(),
+      currency: optionalString,
+      inflow_types: stringList.optional(),
+      outflow_types: stringList.optional(),
+    })
+    .strict(),
+  get_finance_summary: z
+    .object({
+      user_id: optionalString,
+      period: periodEnum.optional(),
+      date: optionalString,
+      entity_id: z.string().uuid().optional(),
+      currency: optionalString,
+      revenue_types: stringList.optional(),
+      expense_types: stringList.optional(),
+      pending_statuses: stringList.optional(),
+    })
+    .strict(),
+  graph_get_object: z
+    .object({
+      user_id: optionalString,
+      object_id: z.string().uuid(),
+    })
+    .strict(),
+  graph_get_connections: z
+    .object({
+      user_id: optionalString,
+      object_id: z.string().uuid(),
+      relation: optionalString,
+      direction: z.enum(['outgoing', 'incoming', 'both']).optional(),
+    })
+    .strict(),
+  graph_get_timeline: z
+    .object({
+      user_id: optionalString,
+      object_id: z.string().uuid(),
+      limit: z.number().int().positive().max(500).optional(),
+      event_type: optionalString,
+    })
+    .strict(),
+};
+
+export function validateToolInput(toolName: string, input: Record<string, any>) {
+  const schema = toolInputSchemas[toolName];
+  if (!schema) {
+    return { ok: true as const, data: input || {} };
+  }
+
+  const parsed = schema.safeParse(input || {});
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => {
+        const field = issue.path.length > 0 ? issue.path.join('.') : 'input';
+        return `${field}: ${issue.message}`;
+      })
+      .join('; ');
+
+    return {
+      ok: false as const,
+      error: sanitizeErrorMessage(`Invalid input: ${issues}`),
+    };
+  }
+
+  return {
+    ok: true as const,
+    data: parsed.data,
+  };
+}
+
+export const READ_ONLY_TOOLS = new Set([
+  'get_profile',
+  'get_entity',
+  'get_related',
+  'get_timeline',
+  'get_summary',
+  'search',
+  'get_metrics',
+  'get_cash_flow',
+  'get_finance_summary',
+  'graph_get_object',
+  'graph_get_connections',
+  'graph_get_timeline',
+]);
 
 /**
  * MCP Handlers - Smart entity management
@@ -1151,6 +1401,10 @@ function getDateRange(period: 'day' | 'week' | 'month' | 'year', referenceDate?:
     case 'year':
       startDate = new Date(ref.getFullYear(), 0, 1);
       break;
+    default:
+      startDate = new Date(ref);
+      startDate.setHours(0, 0, 0, 0);
+      break;
   }
 
   return {
@@ -1164,15 +1418,6 @@ function getDateRange(period: 'day' | 'week' | 'month' | 'year', referenceDate?:
  */
 export function getMcpManifest() {
   const baseUrl = (process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
-  const coreToolNames = new Set([
-    'add_data',
-    'search',
-    'graph_get_object',
-    'graph_get_connections',
-    'graph_get_timeline',
-    'get_timeline',
-    'get_summary',
-  ]);
 
   const standardOutputSchema = {
     type: 'object',
@@ -1329,7 +1574,7 @@ export function getMcpManifest() {
             period: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
             date: { type: 'string' },
           },
-          required: ['period'],
+          required: [],
         },
       },
       {
@@ -1353,7 +1598,7 @@ export function getMcpManifest() {
             entity_id: { type: 'string' },
             entity_type: { type: 'string' },
           },
-          required: ['period'],
+          required: [],
         },
       },
       {
@@ -1466,7 +1711,7 @@ export function getMcpManifest() {
             period: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
             date: { type: 'string' },
           },
-          required: ['period'],
+          required: [],
         },
       },
       {
@@ -1623,7 +1868,6 @@ export function getMcpManifest() {
     ];
 
   const tools = allTools
-    .filter((tool: any) => coreToolNames.has(tool.name))
     .map((tool: any) => ({
       ...tool,
       outputSchema: standardOutputSchema,

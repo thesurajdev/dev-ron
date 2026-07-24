@@ -4,7 +4,7 @@
  * Uses flexible entity model (server-v2)
  */
 
-import { MCP_HANDLERS, getMcpManifest } from './server-v2.js';
+import { MCP_HANDLERS, getMcpManifest, validateToolInput } from './server-v2.js';
 
 export interface MCPRequest {
   jsonrpc?: string;
@@ -61,6 +61,21 @@ function toMcpTool(tool: ManifestTool) {
 function withRuntimeUserScope(args: Record<string, any>, context?: MCPRuntimeContext) {
   if (!context?.userId) return args;
   return { ...args, user_id: context.userId };
+}
+
+function sanitizeErrorMessage(error: unknown): string {
+  const message = String(error || 'Internal error');
+  const lower = message.toLowerCase();
+
+  if (message.includes('<!DOCTYPE html') || message.includes('<html') || lower.includes('cloudflare')) {
+    return 'Upstream service request failed';
+  }
+
+  if (message.length > 300) {
+    return `${message.slice(0, 297)}...`;
+  }
+
+  return message;
 }
 
 function isToolExposed(toolName: string): boolean {
@@ -139,7 +154,7 @@ export async function handleMCPRequest(
 
       if (req.method === 'tools/call') {
         const toolName = req.params?.name;
-        const args = withRuntimeUserScope(req.params?.arguments || {}, context);
+        const rawArgs = withRuntimeUserScope(req.params?.arguments || {}, context);
 
         if (!toolName || !MCP_HANDLERS[toolName] || !isToolExposed(toolName)) {
           return {
@@ -152,8 +167,20 @@ export async function handleMCPRequest(
           };
         }
 
+        const validation = validateToolInput(toolName, rawArgs);
+        if (!validation.ok) {
+          return {
+            jsonrpc: '2.0',
+            id: req.id,
+            error: {
+              code: -32602,
+              message: validation.error,
+            },
+          };
+        }
+
         try {
-          const toolResult = await MCP_HANDLERS[toolName](args);
+          const toolResult = await MCP_HANDLERS[toolName](validation.data);
           return {
             jsonrpc: '2.0',
             id: req.id,
@@ -172,7 +199,7 @@ export async function handleMCPRequest(
             id: req.id,
             error: {
               code: -32603,
-              message: err.message || 'Internal error',
+              message: sanitizeErrorMessage(err?.message || 'Internal error'),
             },
           };
         }
@@ -191,17 +218,22 @@ export async function handleMCPRequest(
     // Handle legacy format: { tool, input }
     if (req.tool) {
       const toolName = req.tool;
-      const args = withRuntimeUserScope(req.input || {}, context);
+      const rawArgs = withRuntimeUserScope(req.input || {}, context);
 
       if (!MCP_HANDLERS[toolName] || !isToolExposed(toolName)) {
         return { success: false, error: `Tool '${toolName}' not found` } as any;
       }
 
+      const validation = validateToolInput(toolName, rawArgs);
+      if (!validation.ok) {
+        return { success: false, error: validation.error } as any;
+      }
+
       try {
-        const result = await MCP_HANDLERS[toolName](args);
+        const result = await MCP_HANDLERS[toolName](validation.data);
         return result;
       } catch (err: any) {
-        return { success: false, error: err.message || 'Internal error' } as any;
+        return { success: false, error: sanitizeErrorMessage(err?.message || 'Internal error') } as any;
       }
     }
 

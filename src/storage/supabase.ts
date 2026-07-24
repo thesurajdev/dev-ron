@@ -1,11 +1,39 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Entity, Activity, Metric } from '../types/index.js';
 
+function isProductionRuntime(): boolean {
+  const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+  const vercelEnv = String(process.env.VERCEL_ENV || '').toLowerCase();
+  return nodeEnv === 'production' || vercelEnv === 'production';
+}
+
+function assertStoragePreflight() {
+  if (!isProductionRuntime()) {
+    return;
+  }
+
+  const missing: string[] = [];
+  if (!process.env.SUPABASE_URL) missing.push('SUPABASE_URL');
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+
+  if (missing.length > 0) {
+    console.error(
+      `Storage preflight failed in production. Missing required environment variables: ${missing.join(', ')}`
+    );
+  }
+}
+
+assertStoragePreflight();
+
 const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 if (!supabaseUrl || !supabaseKey) {
   console.warn('Warning: Missing Supabase environment variables. Database operations will fail.');
+}
+
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_ANON_KEY) {
+  console.warn('Warning: Using SUPABASE_ANON_KEY for backend runtime may cause RLS write failures.');
 }
 
 export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');

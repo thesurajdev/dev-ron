@@ -64,11 +64,11 @@ app.get('/api/docs', (req: Request, res: Response) => {
       '/api/docs': 'GET - API documentation',
     },
     examples: {
-      store_lead: {
-        tool: 'store_entry',
+      add_lead_data: {
+        tool: 'add_data',
         input: {
           user_id: 'user@example.com',
-          entry_type: 'lead',
+          entity_type: 'lead',
           data: {
             name: 'John Doe',
             email: 'john@example.com',
@@ -78,11 +78,11 @@ app.get('/api/docs', (req: Request, res: Response) => {
           tags: ['important'],
         },
       },
-      get_daily_summary: {
-        tool: 'get_daily_summary',
+      get_monthly_summary: {
+        tool: 'get_summary',
         input: {
           user_id: 'user@example.com',
-          date: '2024-07-23',
+          period: 'month',
         },
       },
     },
