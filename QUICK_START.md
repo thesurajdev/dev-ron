@@ -46,32 +46,6 @@ Use your deployed endpoint:
 
 Claude handles OAuth registration and token flow during connector setup.
 
-## 7. Bootstrap your identity (recommended)
-
-As your first command in Claude after connecting, ask it to call `set_profile`.
-
-Example (personal profile):
-
-```text
-Run set_profile with profile_type=person and save:
-name: Your Name
-phone: Your Phone
-email: your@email.com
-role: Founder
-```
-
-Example (business profile):
-
-```text
-Run set_profile with profile_type=business and save:
-company_name: Your Company
-industry: Your Industry
-website: https://your-domain.com
-owner_name: Your Name
-```
-
-You can verify with `get_profile`.
-
 ## Canonical docs
 
 - Product and architecture: [README.md](README.md)

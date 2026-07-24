@@ -63,6 +63,11 @@ function withRuntimeUserScope(args: Record<string, any>, context?: MCPRuntimeCon
   return { ...args, user_id: context.userId };
 }
 
+function isToolExposed(toolName: string): boolean {
+  const tools = getMcpManifest().tools || [];
+  return tools.some((tool: any) => tool?.name === toolName);
+}
+
 /**
  * Handle MCP requests - supports both JSON-RPC 2.0 and legacy format
  */
@@ -136,7 +141,7 @@ export async function handleMCPRequest(
         const toolName = req.params?.name;
         const args = withRuntimeUserScope(req.params?.arguments || {}, context);
 
-        if (!toolName || !MCP_HANDLERS[toolName]) {
+        if (!toolName || !MCP_HANDLERS[toolName] || !isToolExposed(toolName)) {
           return {
             jsonrpc: '2.0',
             id: req.id,
@@ -188,7 +193,7 @@ export async function handleMCPRequest(
       const toolName = req.tool;
       const args = withRuntimeUserScope(req.input || {}, context);
 
-      if (!MCP_HANDLERS[toolName]) {
+      if (!MCP_HANDLERS[toolName] || !isToolExposed(toolName)) {
         return { success: false, error: `Tool '${toolName}' not found` } as any;
       }
 
